@@ -138,6 +138,7 @@ MathModelAgent-dev/
 ├─ 安装自动更新任务.bat        # 注册计划任务（登录时 + 每 N 分钟）
 ├─ prebuilt/app.asar           # 开发版 asar（当前基线版本）
 ├─ patched/                    # 相对官方被改动的文件（供审阅/重建）
+├─ VERSION                     # 当前补丁包基线信息（版本/哈希/生成时间，自动生成）
 ├─ official/                   # 官方 asar 留存（自动生成，不入库）
 ├─ tools/
 │  ├─ apply-dev.ps1            # 应用补丁（备份 + 覆盖 + 修哈希）
