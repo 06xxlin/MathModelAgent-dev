@@ -63,8 +63,12 @@
 
 安装计划任务（普通权限即可）：
 
-- 双击 `安装自动更新任务.bat`，或
-- `.\tools\install-auto-task.ps1 -IntervalMinutes 60`（也可加 `-Push` 自动提交到仓库）
+- 双击 `安装自动更新任务.bat`（默认 60 分钟、不含自动推送），或
+- `.\tools\install-auto-task.ps1 -IntervalMinutes 60 -Push`（`-Push` = 重制后自动 commit + push）
+
+> 本机当前状态：已注册任务 `MathModelAgentDev-AutoPatch`，**登录时 + 每 60 分钟**检查，
+> **已开启 `-Push`**（重制后自动推送到 `github.com/06xxlin/MathModelAgent-dev`）。
+> 需要改频率或不推送时，重新执行上面的命令即可（`-Remove` 可移除任务）。
 
 其它：
 
