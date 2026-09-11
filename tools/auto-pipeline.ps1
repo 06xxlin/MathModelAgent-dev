@@ -166,6 +166,17 @@ if ($Mode -eq 'local') {
     exit 0
   }
   Log "检测到官方版（或强制重制），开始重制补丁包 …" -color Cyan
+
+  # 强制重制时，若安装目录已是开发版，优先用留存的官方 asar 作为源（避免拿补丁包再打补丁）
+  if ($isPatched) {
+    $keepOfficial = Join-Path $PackageRoot ("official\app.asar-" + $version)
+    if (Test-Path -LiteralPath $keepOfficial) {
+      Log "安装目录已是开发版；改用留存的官方 asar 作为源: official\app.asar-$version"
+      $sourceAsar = $keepOfficial
+    } else {
+      Log "⚠ 未找到留存的官方 asar，将直接对当前（已打补丁的）asar 重跑补丁器（幂等）" -color Yellow
+    }
+  }
 } else {
   $src = Get-SourceFromInstaller $Installer $SourceDir
   $sourceAsar = $src.Asar; $sourceUnpacked = $src.Unpacked; $staging = $src.Staging
@@ -243,17 +254,42 @@ $stateObj = [ordered]@{
 ($stateObj | ConvertTo-Json) | Set-Content -LiteralPath $stateFile -Encoding UTF8
 Log "状态已写入 .auto-state.json"
 
+# 记录当前补丁包版本信息（也是给仓库留一个可提交的变化）
+$versionFile = Join-Path $PackageRoot "VERSION"
+@(
+  "patchFor=$($report.version)",
+  "headerHash=$($report.headerHash)",
+  "officialAsarSha256=$($report.officialAsarSha256)",
+  "builtAt=$((Get-Date).ToString('s'))",
+  "touched=$($report.touched)"
+) | Set-Content -LiteralPath $versionFile -Encoding UTF8
+
 if ($Push) {
   Log "提交并推送补丁包 …" -color Cyan
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'   # git 的 stderr 警告不应被当成异常
   Push-Location $PackageRoot
   try {
     git add -A 2>&1 | Out-Null
-    $msg = "auto: 重制开发版补丁包 v$($report.version)"
-    git -c user.name="$(git config user.name)" -c user.email="$(git config user.email)" commit -m $msg 2>&1 | Out-Null
-    git push 2>&1 | ForEach-Object { Log ("git: " + $_) }
-    Log "推送完成。"
-  } catch { Log ("git 提交/推送失败: " + $_.Exception.Message) -color Yellow }
-  finally { Pop-Location }
+    $changes = @(git status --porcelain 2>$null)
+    if ($changes.Count -eq 0) {
+      Log "无文件变化，跳过提交。"
+    } else {
+      $msg = "auto: 重制开发版补丁包 v$($report.version)"
+      $uname = (git config user.name); $umail = (git config user.email)
+      if (-not $uname) { $uname = $env:USERNAME }
+      if (-not $umail) { $umail = "$env:USERNAME@localhost" }
+      git -c "user.name=$uname" -c "user.email=$umail" commit -m $msg 2>&1 | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        Log "git commit 失败（退出码 $LASTEXITCODE），跳过推送。" -color Yellow
+      } else {
+        Log ("已提交: " + $msg)
+        git push 2>&1 | ForEach-Object { Log ("git: " + $_) }
+        if ($LASTEXITCODE -eq 0) { Log "推送完成。" } else { Log "git push 失败（退出码 $LASTEXITCODE）" -color Yellow }
+      }
+    }
+  } catch { Log ("git 提交/推送异常: " + $_.Exception.Message) -color Yellow }
+  finally { Pop-Location; $ErrorActionPreference = $prevEap }
 }
 
 if ($staging -and (Test-Path -LiteralPath $staging)) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }

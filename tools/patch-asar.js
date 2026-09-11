@@ -249,16 +249,24 @@ const prePath = path.join(tree, preRel);
 let pre = fs.readFileSync(prePath, 'utf8');
 {
   // 4.1 强制本地身份（免登录）：把 --mathmodel-e2e 判定改为恒真
-  const r = replaceOnce(pre, /const (\w+)=process\.argv\.includes\("--mathmodel-e2e"\);/, 'const $1=!0x0;/*dev*/', 'preload.e2eFlag');
-  if (!r.ok) throw new Error('preload 本地身份锚点未找到');
-  pre = r.content;
+  if (/const \w+=!0x0;\/\*dev\*\//.test(pre)) {
+    report.anchors['preload.e2eFlag'] = 'already-patched';
+  } else {
+    const r = replaceOnce(pre, /const (\w+)=process\.argv\.includes\("--mathmodel-e2e"\);/, 'const $1=!0x0;/*dev*/', 'preload.e2eFlag');
+    if (!r.ok) throw new Error('preload 本地身份锚点未找到');
+    pre = r.content;
+  }
 
   // 4.2 本地身份显示名
-  const r2 = replaceOnce(pre, /name:"E2E User",email:"e2e@localhost\.invalid"/, 'name:"开发者",email:"dev@local.mathmodel"', 'preload.identityName');
-  if (!r2.ok) report.warnings.push('本地身份显示名未替换（可能官方改了假身份字段）');
-  else pre = r2.content;
+  if (pre.includes('name:"开发者",email:"dev@local.mathmodel"')) {
+    report.anchors['preload.identityName'] = 'already-patched';
+  } else {
+    const r2 = replaceOnce(pre, /name:"E2E User",email:"e2e@localhost\.invalid"/, 'name:"开发者",email:"dev@local.mathmodel"', 'preload.identityName');
+    if (r2.ok) pre = r2.content;
+    else report.warnings.push('本地身份显示名未替换（可能官方改了假身份字段）');
+  }
 
-  // 4.3 账户/权益/积分桥接本地化
+  // 4.3 账户/权益/积分桥接本地化（已替换过的跳过，保证可重复运行）
   const stubs = [
     [/getEntitlements:\(\)=>\w+\.invoke\("mathmodel:auth-entitlements"\)/,
       'getEntitlements:async()=>({ok:!0x0,active:!0x0,lifetime:!0x0,source:"purchase",plan:"pro",expiresAt:null,error:null})'],
@@ -276,16 +284,18 @@ let pre = fs.readFileSync(prePath, 'utf8');
       'cancelPendingReads:async()=>null'],
   ];
   for (const [re, repl] of stubs) {
-    const r3 = replaceOnce(pre, re, repl, 'preload.' + re.source.slice(0, 24));
+    const label = 'preload.' + re.source.slice(0, 24);
+    if (pre.includes(repl)) { report.anchors[label] = 'already-patched'; continue; }
+    const r3 = replaceOnce(pre, re, repl, label);
     if (r3.ok) pre = r3.content;
   }
 
-  // 4.4 提示可能新增的、仍走主进程的 auth 通道
-  const left = [...pre.matchAll(/mathmodel:auth-[a-z-]+/g)].map(m => m[0]);
+  // 4.4 提示可能新增的、仍真正调用主进程的 auth 通道
   const known = ['mathmodel:auth-entitlements', 'mathmodel:auth-collab-access-pass', 'mathmodel:auth-credits',
     'mathmodel:auth-cancel-reads', 'mathmodel:auth-pending-notification', 'mathmodel:auth-read-notification',
     'mathmodel:auth-open-recharge', 'mathmodel:auth-redeem', 'mathmodel:auth-credits-changed'];
-  const unknown = [...new Set(left)].filter(x => !known.includes(x));
+  const invoked = [...pre.matchAll(/invoke\("(mathmodel:auth-[a-z-]+)"/g)].map(m => m[1]);
+  const unknown = [...new Set(invoked)].filter(x => !known.includes(x));
   if (unknown.length) report.warnings.push('preload 中仍存在未本地化的 auth 通道（请人工确认）: ' + unknown.join(', '));
 
   fs.writeFileSync(prePath, pre);
@@ -309,7 +319,14 @@ if (fs.existsSync(assetsDir)) {
     }
   }
 }
-if (!rendererChanged) report.warnings.push('renderer 文案锚点「桌面终生版」未找到');
+if (!rendererChanged) {
+  // 已经是开发版文案（「开发版」已存在）就不算问题
+  const already = fs.existsSync(assetsDir) && fs.readdirSync(assetsDir).some(f => {
+    if (!f.endsWith('.js')) return false;
+    return fs.readFileSync(path.join(assetsDir, f), 'utf8').includes('开发版');
+  });
+  if (!already) report.warnings.push('renderer 文案锚点「桌面终生版」未找到');
+}
 
 // ---------------- 6. 重新打包 ----------------
 console.log('[6/6] 重新打包 …');

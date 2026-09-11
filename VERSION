@@ -1,0 +1,5 @@
+﻿patchFor=0.0.19
+headerHash=9fd0ed8f4e2e50d24c5b33a6897ad11eafb5eb61938c61abdce0755217526dc9
+officialAsarSha256=1bb87e2273f0a8f6ea7f4edca3316b5efb34856f49698b6e25be1ef88e91cca9
+builtAt=2026-09-11T23:12:06
+touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-B3fOHmBi.js
