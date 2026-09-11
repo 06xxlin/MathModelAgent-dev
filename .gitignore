@@ -3,3 +3,12 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 *.log
+
+# 自动流水线产生的本地状态 / 依赖 / 备份（不入库）
+node_modules/
+package-lock.json
+.auto-state.json
+.auto-report.*
+logs/
+official/
+prebuilt/*.hash.txt

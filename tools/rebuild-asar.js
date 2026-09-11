@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * rebuild-asar.js — 基于“官方 app.asar + 本包 patched 覆盖层”重新制作开发版 asar。
+ * rebuild-asar.js — 基于「官方 app.asar + 本包 patched 覆盖层」重新制作开发版 asar。
+ * 官方发布新版本（>= 0.0.20）后，用这个脚本重新生成 prebuilt/app.asar。
  *
  * 用法:
  *   npm i @electron/asar
@@ -8,11 +9,15 @@
  *
  * 步骤: 解包官方 asar → 覆盖 patched\ 下的同名文件 → 复制官方 app.asar.unpacked
  *       (native 模块) 回树 → 用与官方相同的 unpack 规则重打包 → 打印头部哈希。
- * 之后仍须运行 patch-exe-hash.js 改写 exe 内嵌哈希。
+ * 之后用 tools\patch-exe-hash.ps1 (或 .js) 改写 exe 内嵌哈希。
+ *
+ * 注意: 官方若改动了 out/ 下的文件名（例如 renderer 分包哈希变化），
+ *       需要同步更新 patched\ 目录里的文件与 build019.js 中的替换点。
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
@@ -38,12 +43,15 @@ try {
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mma-dev-'));
 const exDir = path.join(tmp, 'app');
-const unpackDirName = 'app.asar.unpacked';
 
 console.log('[1/5] 解包官方 asar → ' + exDir);
-asarPkg.extractAll(srcAsar, exDir);
+try {
+  asarPkg.extractAll(srcAsar, exDir);
+} catch (e) {
+  console.log('  (忽略 unpacked 条目告警: ' + e.message.split('\n')[0] + ')');
+}
 
-console.log('[2/5] 覆盖 patched 文件…');
+console.log('[2/5] 覆盖 patched 文件 …');
 const patchedRoot = path.join(root, 'patched');
 for (const rel of walk(patchedRoot)) {
   const target = path.join(exDir, rel);
@@ -52,11 +60,10 @@ for (const rel of walk(patchedRoot)) {
   console.log('      patched/' + rel);
 }
 
-console.log('[3/5] 复制官方 native(unpacked) 目录…');
-const officialUnpacked = path.join(path.dirname(srcAsar), unpackDirName);
+console.log('[3/5] 复制官方 native(unpacked) 目录 …');
+const officialUnpacked = path.join(path.dirname(srcAsar), 'app.asar.unpacked');
 if (fs.existsSync(officialUnpacked)) {
-  const natives = ['node_modules/better-sqlite3', 'node_modules/node-pty'];
-  for (const rel of natives) {
+  for (const rel of ['node_modules/better-sqlite3', 'node_modules/node-pty']) {
     const s = path.join(officialUnpacked, rel);
     const d = path.join(exDir, rel);
     if (fs.existsSync(s)) {
@@ -67,26 +74,33 @@ if (fs.existsSync(officialUnpacked)) {
   }
 }
 
-console.log('[4/5] 重打包(与官方相同的 unpack 规则)…');
+console.log('[4/5] 重打包(与官方相同的 unpack 规则) …');
 fs.mkdirSync(path.dirname(outAsar), { recursive: true });
-try {
-  asarPkg.createPackageWithOptions(exDir, outAsar, {
-    unpackDir: '{node_modules/better-sqlite3,node_modules/node-pty}',
-  });
-} catch (err) {
-  console.error('API 打包失败，退回 CLI: ' + err.message);
-  const cli = require.resolve('@electron/asar/bin/asar.mjs');
-  execFileSync(process.execPath, [cli, 'pack', exDir, outAsar,
-    '--unpack-dir', '{node_modules/better-sqlite3,node_modules/node-pty}'], { stdio: 'inherit' });
-}
+fs.rmSync(outAsar, { force: true });
+const cli = path.join(path.dirname(require.resolve('@electron/asar')), '..', 'bin', 'asar.mjs');
+execFileSync(process.execPath, [cli, 'pack', exDir, outAsar,
+  '--unpack-dir', '{node_modules/better-sqlite3,node_modules/node-pty}'], { stdio: 'inherit' });
 
-console.log('[5/5] 输出: ' + outAsar);
+console.log('[5/5] 计算头部哈希 …');
 const b = fs.readFileSync(outAsar);
-const len = b.readUInt32LE(4) - 10;
-const crypto = require('crypto');
-const hash = crypto.createHash('sha256').update(b.slice(16, 16 + len)).digest('hex');
-console.log('asar 头部哈希: ' + hash);
-console.log('下一步: node tools/patch-exe-hash.js "<exe路径>" "' + outAsar + '"');
+const start = b.indexOf(0x7b); // '{'
+let depth = 0, end = -1, inStr = false, esc = false;
+for (let i = start; i < b.length; i++) {
+  const ch = b[i];
+  if (inStr) {
+    if (esc) esc = false;
+    else if (ch === 0x5c) esc = true;
+    else if (ch === 0x22) inStr = false;
+    continue;
+  }
+  if (ch === 0x22) { inStr = true; continue; }
+  if (ch === 0x7b) depth++;
+  else if (ch === 0x7d) { depth--; if (depth === 0) { end = i; break; } }
+}
+const hash = crypto.createHash('sha256').update(b.slice(start, end + 1)).digest('hex');
+console.log('  输出: ' + outAsar + ' (' + b.length + ' 字节)');
+console.log('  头部哈希: ' + hash);
+console.log('下一步: .\\tools\\patch-exe-hash.ps1 -Exe "<exe路径>" -Asar "' + outAsar + '"');
 fs.rmSync(tmp, { recursive: true, force: true });
 
 function walk(d, prefix = '') {

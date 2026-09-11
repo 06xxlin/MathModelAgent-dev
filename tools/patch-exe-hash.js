@@ -5,11 +5,13 @@
  * 用法:
  *   node patch-exe-hash.js <mathmodel.exe 路径> <app.asar 路径> [-ActualHash <64位hex>]
  *
- * 原理: electron-builder 在 exe 末尾内嵌 JSON 清单:
+ * 原理: electron-builder 在 exe 中内嵌 JSON 清单:
  *   [{"file":"resources\\app.asar","alg":"SHA256","value":"<64位hex>"}]
- * 清单值必须等于 app.asar 头部区间的 SHA-256。头部区间算法(已在 v0.0.17 win-x64 上验证):
- *   SHA256( app.asar 字节[16, 16 + (readUInt32LE(4) - 10)) )
- * 若不匹配, 启动即崩: "Integrity check failed for asar archive entry '<header>'".
+ * 该值 = app.asar 头部 JSON 文本（从文件偏移 16 开始、长度等于 JSON 字符串本身）的 SHA-256。
+ * 不匹配时启动即崩: "Integrity check failed for asar archive entry '<header>'"
+ * 已在 v0.0.17 / v0.0.19 win-x64 上实测通过。
+ *
+ * 注: 早期版本用 "u32@4 - 10" 推测长度, 仅在 JSON 长度为偶数时成立; 现已改为精确 JSON 配对。
  */
 const fs = require('fs');
 const crypto = require('crypto');
@@ -24,22 +26,39 @@ if (!exePath || !asarPath) {
   console.error('用法: node patch-exe-hash.js <exe路径> <asar路径> [-ActualHash <hex>]');
   process.exit(2);
 }
+
 const asar = fs.readFileSync(asarPath);
-const headerLenField = asar.readUInt32LE(4);
-const regionLen = headerLenField - 10;
-const start = 16;
-if (regionLen <= 0 || start + regionLen > asar.length) {
-  console.error('无法解析 asar 头部长度字段 (u32@4=' + headerLenField + ')');
+const start = asar.indexOf(0x7b /* { */, 0);
+if (start < 0 || start > 64) {
+  console.error('未找到 asar 头部 JSON 起点');
   process.exit(1);
 }
-let hash = crypto.createHash('sha256').update(asar.slice(start, start + regionLen)).digest('hex');
+let depth = 0, end = -1, inStr = false, esc = false;
+for (let i = start; i < asar.length; i++) {
+  const ch = asar[i];
+  if (inStr) {
+    if (esc) esc = false;
+    else if (ch === 0x5c /* \ */) esc = true;
+    else if (ch === 0x22 /* " */) inStr = false;
+    continue;
+  }
+  if (ch === 0x22) { inStr = true; continue; }
+  if (ch === 0x7b) depth++;
+  else if (ch === 0x7d) { depth--; if (depth === 0) { end = i; break; } }
+}
+if (end < 0) {
+  console.error('asar 头部 JSON 不完整');
+  process.exit(1);
+}
+const jsonLen = end - start + 1;
+let hash = crypto.createHash('sha256').update(asar.slice(start, end + 1)).digest('hex');
+console.log(`头部 JSON 区间: [${start}, ${end}]，长度 ${jsonLen}`);
 if (argActual) {
-  console.warn('使用外部提供的 actual 哈希覆盖计算值: ' + argActual);
+  console.warn('使用外部提供的 actual 哈希: ' + argActual);
   hash = argActual;
 }
 
 let exe = fs.readFileSync(exePath);
-// 定位内嵌清单中 app.asar 条目(JSON 里反斜杠是转义后的两个字符)
 const marker = Buffer.from('"file":"resources\\\\app.asar"', 'ascii');
 const mi = exe.indexOf(marker);
 if (mi < 0) {
@@ -58,7 +77,7 @@ if (!/^[0-9a-f]{64}$/i.test(oldHex)) {
   process.exit(1);
 }
 if (oldHex.toLowerCase() === hash.toLowerCase()) {
-  console.log('哈希已一致(' + hash + ')，无需修改');
+  console.log('哈希已一致，无需修改: ' + hash);
 } else {
   Buffer.from(hash, 'ascii').copy(exe, vi + valKey.length);
   fs.writeFileSync(exePath, exe);

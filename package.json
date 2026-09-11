@@ -1,0 +1,18 @@
+{
+  "name": "mathmodelagent-dev",
+  "version": "0.0.19",
+  "private": true,
+  "description": "MathModel 桌面版「开发版」补丁包：去登录/去积分/去权益门槛，并支持官方更新后自动重制",
+  "scripts": {
+    "patch": "node tools/patch-asar.js --help",
+    "auto": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/auto-pipeline.ps1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/06xxlin/MathModelAgent-dev.git"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@electron/asar": "^4.3.0"
+  }
+}
