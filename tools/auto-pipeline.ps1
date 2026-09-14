@@ -133,6 +133,14 @@ Log "===== auto-pipeline 开始 (Mode=$Mode) ====="
 $appRoot = Resolve-AppRoot $AppRoot
 if ($appRoot) { Log "安装目录: $appRoot" } else { Log "未找到安装目录（本地模式需要先安装官方版）" -color Yellow }
 
+# 【重要】补丁包必须放在安装目录之外：官方更新会整体重写安装目录，放在里面的补丁包会被删掉
+if ($appRoot -and $PackageRoot.ToLower().StartsWith($appRoot.ToLower())) {
+  Log "⚠⚠ 严重提醒：补丁包位于安装目录内（$PackageRoot）" -color Yellow
+  Log "    官方更新时会整体重写安装目录，补丁包会被删除，导致更新后无法自动变回开发版。" -color Yellow
+  Log "    请把补丁包移动到安装目录之外（例如 C:\Users\<你>\MathModel Projects\MathModelAgent-dev）" -color Yellow
+  Log "    移动后重新运行：tools\install-auto-task.ps1 -IntervalMinutes 60 -Push" -color Yellow
+}
+
 $sourceAsar = $null; $sourceUnpacked = $null; $staging = $null
 
 if ($Mode -eq 'local') {
@@ -284,7 +292,13 @@ if ($Push) {
         Log "git commit 失败（退出码 $LASTEXITCODE），跳过推送。" -color Yellow
       } else {
         Log ("已提交: " + $msg)
-        git push 2>&1 | ForEach-Object { Log ("git: " + $_) }
+        $pushOut = git push 2>&1
+        if ($LASTEXITCODE -ne 0) {
+          # 常见坑：全局配置了 github 代理（http.https://github.com.proxy），代理没开时推送会失败
+          Log "git push 失败，尝试绕过本地代理重试 …" -color Yellow
+          $pushOut = git -c "http.https://github.com.proxy=" -c "https.https://github.com.proxy=" push 2>&1
+        }
+        $pushOut | ForEach-Object { Log ("git: " + $_) }
         if ($LASTEXITCODE -eq 0) { Log "推送完成。" } else { Log "git push 失败（退出码 $LASTEXITCODE）" -color Yellow }
       }
     }

@@ -159,3 +159,58 @@ MathModelAgent-dev/
   不影响本地建模、写论文、绘图、运行 Python/LaTeX 等核心能力。
 - 本包仅用于**你自己拥有合法副本**的软件改造与本地开发，请勿用于规避他人软件的付费授权。
 - 数据目录不变：`%APPDATA%\@mathmodel\desktop`。
+
+---
+
+## 八、常见问题（踩过的坑）
+
+### Q1. 官方更新后，软件没有自动变回开发版？
+
+**最常见原因：补丁包被放在了安装目录里面。**
+MathModel 的官方更新是**整体重写安装目录**（所有 exe/dll/resources 都是新时间戳），
+放在安装目录内的补丁包（例如 `<安装目录>\补丁包\MathModelAgent-dev`）会被一起删除，
+于是既没有 prebuilt 可覆盖，计划任务指向的脚本也不存在了 → 更新后停在官方版。
+
+✅ 正确做法：**补丁包必须放在安装目录之外**（本机现在放在
+`C:\Users\lin\MathModel Projects\MathModelAgent-dev`）。
+流水线每次运行也会检查，如果发现补丁包在安装目录内会打印 ⚠⚠ 提醒。
+
+排查与恢复步骤：
+
+```powershell
+# 1) 补丁包是否还在？（不在就从仓库重新克隆到安装目录之外）
+Test-Path "C:\Users\lin\MathModel Projects\MathModelAgent-dev\tools\auto-pipeline.ps1"
+
+# 2) 计划任务指向的路径是否有效
+(Get-ScheduledTask -TaskName "MathModelAgentDev-AutoPatch").Actions.Arguments
+(Get-ScheduledTaskInfo -TaskName "MathModelAgentDev-AutoPatch").LastTaskResult   # 0 = 成功
+
+# 3) 手动跑一次（会检测官方版本 → 重制 → 应用 → 启动）
+.\tools\auto-pipeline.ps1
+```
+
+路径变了（补丁包被移动/重装过）就重新注册任务：
+`.\tools\install-auto-task.ps1 -IntervalMinutes 60 -Push`
+
+### Q2. 任务在跑，但日志里没动作 / 报错？
+
+- 看 `logs\auto-YYYYMMDD.log`（每次运行都有开始/结束行与原因）；
+- `LastTaskResult` 非 0：多为路径失效（脚本被删/被移动）；
+- Node 未安装或 `@electron/asar` 缺失：流水线会自动 `npm i`，若失败请手动在补丁包目录执行 `npm install`。
+- 直接吃官方安装包的 `-Mode installer` 需要 7-Zip。
+
+### Q3. 自动推送失败，日志里出现 "Failed to connect ... over proxy 127.0.0.1"？
+
+本机 git 配了 github 专用代理（`http.https://github.com.proxy`），代理没开时推送会失败。
+流水线**会自动去掉该代理重试一次**；手动推送同样可以：
+
+```powershell
+git -c "http.https://github.com.proxy=" push
+```
+
+### Q4. 想关掉自动重制/自动推送？
+
+```powershell
+.\tools\install-auto-task.ps1 -Remove                                  # 移除计划任务
+.\tools\install-auto-task.ps1 -IntervalMinutes 60                       # 只本地自动，不推送
+```
