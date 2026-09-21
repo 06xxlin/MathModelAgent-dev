@@ -7,10 +7,10 @@
  *
  * 用法:
  *   node tools/patch-asar.js --official-asar <官方 app.asar> --out <输出 asar> \
- *        [--patched-dir <patched 目录>] [--report <json 路径>] [--keep-tree]
+ *        [--patched-dir <patched 目录>] [--report <json 路径>] [--keep-tree] [--no-isolation]
  *
  * 输出:
- *   - 开发版 app.asar
+ *   - 开发版 app.asar（默认已做网络隔离：切断 https://mathmodel.top 后台 + 停用遥测上报）
  *   - patched/ 下被改动的文件（供 rebuild-asar.js / 人工核对）
  *   - report.json：版本、锚点、改动文件、头部哈希、unpack 目录等
  */
@@ -35,8 +35,16 @@ const keepTree = !!opt('keep-tree', false);
 const debug = !!opt('debug', false);
 const unpackedDirOpt = typeof opt('unpacked-dir') === 'string' ? opt('unpacked-dir') : null;
 const allowMissingNatives = !!opt('allow-missing-natives', false);
+
+// 网络隔离：后台基址（https://mathmodel.top）会被替换成这个「本机不可达」地址。
+// 端口 9 是 discard 端口，本机没有监听 → 连接瞬时被拒，既不解析域名、也不产生任何外发流量。
+// 想保留后台连接（例如排查问题）时加 --no-isolation；也可用 --isolation-sentinel <url> 自定义。
+const noIsolation = !!opt('no-isolation', false);
+const isolationSentinel = typeof opt('isolation-sentinel') === 'string' ? opt('isolation-sentinel') : 'http://127.0.0.1:9';
+const backendUrl = 'https://mathmodel.top';
+
 if (!officialAsar || !outAsar) {
-  console.error('用法: node patch-asar.js --official-asar <官方 app.asar> --out <输出 asar> [--patched-dir dir] [--report json]');
+  console.error('用法: node patch-asar.js --official-asar <官方 app.asar> --out <输出 asar> [--patched-dir dir] [--report json] [--no-isolation]');
   process.exit(2);
 }
 if (!fs.existsSync(officialAsar)) { console.error('找不到官方 asar: ' + officialAsar); process.exit(2); }
@@ -234,6 +242,54 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     if (r.ok) { mainSrc = r.content; patched = true; }
   }
   if (!patched) throw new Error('主进程计费锚点未找到（chargeDesktopConversation 赋值）');
+
+  // ---- 网络隔离（1/2）：把后台基址换成不可达的本地地址 ----
+  // 官方写法: Bl = app.isPackaged ? 'https://mathmodel.top' : <origin 校验函数>
+  // 所有远端 /api/* 请求（app-config / me / user / collab / telemetry / proxy …）都由这个基址拼出，
+  // 换掉它 = 整体断链：请求会打到本机未监听端口并立刻失败，不解析域名、不产生任何外发流量。
+  if (noIsolation) {
+    report.anchors['main.backendBase'] = 'skipped(--no-isolation)';
+    console.log('      ⚠ 已按 --no-isolation 跳过后台断链');
+  } else {
+    const sentinelLiteral = "'" + isolationSentinel + "'";
+    if (mainSrc.includes(sentinelLiteral)) {
+      report.anchors['main.backendBase'] = 'already-patched';
+    } else {
+      const re = /(['"])https:\/\/mathmodel\.top\1/g;
+      const hits = mainSrc.match(re) || [];
+      if (hits.length === 0) {
+        report.warnings.push('[main.backendBase] 未找到后台基址字面量 ' + backendUrl + '（官方可能改了写法，断链未生效）');
+      } else {
+        mainSrc = mainSrc.replace(re, sentinelLiteral);
+        report.anchors['main.backendBase'] = hits.length;
+        report.backendBlocked = hits.length;
+        console.log('      后台基址已切断: ' + backendUrl + ' -> ' + isolationSentinel + '（' + hits.length + ' 处）');
+      }
+    }
+  }
+
+  // ---- 网络隔离（2/2）：停用遥测批量上报 ----
+  // 找到向 /api/desktop/telemetry/batch POST 的那个函数，整体替换为「直接返回成功」，
+  // 这样事件不再外发、本地发件箱也不会一直堆积重试。
+  if (noIsolation) {
+    report.anchors['main.telemetryBatch'] = 'skipped(--no-isolation)';
+  } else if (mainSrc.includes('/*dev-notel*/')) {
+    report.anchors['main.telemetryBatch'] = 'already-patched';
+  } else {
+    const telRe = /(?:async\s+)?function (\w+)\((\w+)\)\{const (\w+)=_0x[0-9a-fA-F]+(?:\(\))?;if\(0x0===\2\[\3\(0x73f\)\]\)return!0x0;const \w+=await \w+\(\3\(0x8e8\)/;
+    const tm = telRe.exec(mainSrc);
+    if (!tm) {
+      report.warnings.push('[main.telemetryBatch] 未定位到遥测批量上传函数（跳过；断链已由基址替换保证）');
+    } else {
+      const fnStart = tm.index;
+      const fnEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', fnStart));
+      mainSrc = mainSrc.slice(0, fnStart) + 'async function ' + tm[1] + '(' + tm[2] + '){return!0x0;/*dev-notel*/}' + mainSrc.slice(fnEnd + 1);
+      report.anchors['main.telemetryBatch'] = 'stubbed';
+      report.telemetryStubbed = true;
+      console.log('      遥测上报已停用: ' + tm[1] + '() → 直接返回成功（事件不再外发）');
+    }
+  }
+
   fs.writeFileSync(mainPath, mainSrc);
   report.touched.push(mainRel);
 }
@@ -383,6 +439,8 @@ if (reportPath) {
     'officialAsarSha256=' + (report.officialAsarSha256 || ''),
     'unpackDirs=' + (report.unpackDirs || []).join(','),
     'touched=' + (report.touched || []).join(','),
+    'backendBlocked=' + (report.backendBlocked || 0),
+    'telemetryStubbed=' + (report.telemetryStubbed ? 1 : 0),
     'warnings=' + (report.warnings || []).join(' | '),
   ];
   fs.writeFileSync(txt, lines.join('\r\n') + '\r\n');

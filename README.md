@@ -92,7 +92,7 @@ MathModel 桌面版是 Electron 应用，业务代码在 `<安装目录>\resourc
 
 | 文件 | 改动 |
 | --- | --- |
-| `out/main/index.js` | `chargeDesktopConversation` 置空 → 取消每条对话的云端积分计费 |
+| `out/main/index.js` | `chargeDesktopConversation` 置空 → 取消每条对话的云端积分计费；**后台基址改成 `http://127.0.0.1:9`（断链）**；**遥测批量上报函数停用** |
 | `out/preload/index.mjs` | 强制启用本地身份（免登录）；`entitlements / credits / 充值 / 兑换 / 通知 / cancelPendingReads` 等桥接改为本地应答 |
 | `out/renderer/assets/index-*.js` | 文案「桌面终生版」→「开发版」 |
 
@@ -151,6 +151,8 @@ MathModelAgent-dev/
 │  ├─ patch-asar.js            # 通用补丁器：官方 asar → 开发版 asar（自动锚点）
 │  ├─ rebuild-asar.js          # 用 patched/ 覆盖层重建（等价流程，兼容旧用法）
 │  ├─ auto-pipeline.ps1        # 自动流水线（检测→重制→应用→可选提交）
+│  ├─ block-backend.ps1        # hosts 兜底：后台域名 → 0.0.0.0（-Remove 撤销）
+│  ├─ purge-local-identity.ps1 # 清理本地登录态/遥测残留（先备份，不动用户内容）
 │  ├─ install-auto-task.ps1    # 注册/移除计划任务（schtasks + XML，无需管理员）
 │  └─ read-version.js          # 读取 asar 内版本号
 └─ logs/, .auto-state.json     # 运行日志与状态（自动生成，不入库）
@@ -219,3 +221,50 @@ git -c "http.https://github.com.proxy=" push
 .\tools\install-auto-task.ps1 -Remove                                  # 移除计划任务
 .\tools\install-auto-task.ps1 -IntervalMinutes 60                       # 只本地自动，不推送
 ```
+
+---
+
+## 九、切断与后台服务器的联系（网络隔离）
+
+开发版默认**不再与后台 `mathmodel.top` 有任何往来**，三层保障：
+
+| 层 | 做法 | 位置 |
+| --- | --- | --- |
+| 1. 代码层（核心） | 主进程的后台基址常量 `https://mathmodel.top` → `http://127.0.0.1:9`（discard 端口，本机无监听）。所有远端 `/api/*`（`app-config / me / user / collab / telemetry / proxy / feishu …`）都由这个基址拼出，因此整体断链：请求打到本机立刻失败，**既不解析域名也不外发任何字节** | `tools/patch-asar.js` 第 3 节 |
+| 2. 代码层 | 向 `/api/desktop/telemetry/batch` 上报的函数被整体替换为「直接返回成功」，事件不再外发，本地发件箱也不会堆积重试 | 同上 |
+| 3. DNS 兜底（可选） | hosts 里把后台域名指向 `0.0.0.0`，防止某条路径绕过基址常量按域名直连 | `tools/block-backend.ps1` |
+
+```powershell
+.\tools\block-backend.ps1            # 写入 hosts 拦截（需要管理员，会弹 UAC）
+.\tools\block-backend.ps1 -Remove    # 撤销
+```
+
+### 清除本地身份痕迹
+
+后台之所以能把机器和 QQ 邮箱对上，靠的是本地留存的登录态 + 固定安装 ID：
+
+```powershell
+.\tools\purge-local-identity.ps1           # 备份并移除 auth-store.json / telemetry-outbox.json
+.\tools\purge-local-identity.ps1 -WhatIf   # 只预览要做什么
+```
+
+只动 App 自己的状态文件（`auth-store.json`、`telemetry-outbox.json`、必要时 `Network\Cookies`），
+**绝不触碰** `workspace\`、`version-history\`、`sdk-config\`、`codex-home\`、`mathmodel.db` 等用户内容；
+移除前一律备份到 `%APPDATA%\@mathmodel\_purge-backup-<时间戳>\`，拷回去即可还原。
+
+### 影响范围
+
+- **保留**：本地建模、写论文、绘图、Python/LaTeX 环境、自定义模型 API Key（直连你自己的服务商）、GitHub 插件与官方自动更新。
+- **失效**：账号中心、权益/积分、数模广场分享与阅读、云同步、协作（走后台 WS）、后台模型代理、飞书/微信的后台通道。
+- 校验方式：重制后看 `.auto-report.txt` 里的 `backendBlocked=1` 与 `telemetryStubbed=1`；
+  实测可 `Get-NetTCPConnection` 对比后台域名解析出的 IP，确认没有任何连接。
+
+### 想恢复后台连接
+
+```powershell
+node tools/patch-asar.js --official-asar official\app.asar-0.0.21 --out prebuilt\app.asar --no-isolation ...
+.\tools\block-backend.ps1 -Remove
+```
+
+即 `patch-asar.js` 加 `--no-isolation`（也可用 `--isolation-sentinel <url>` 自定义替换目标）。
+

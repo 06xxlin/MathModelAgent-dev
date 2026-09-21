@@ -1,5 +1,5 @@
 ﻿patchFor=0.0.21
-headerHash=2cc5819d4cbd40762ec7dd64db2058c0a09f813a5bbf1e5019313de45939d21d
+headerHash=34f379d246e825acbbc5bef912029acce97130c61d2145dd1c8595f2f41225f9
 officialAsarSha256=b8d92692a84f128465bbe8cc4bc2fbabc4b5271fdb80f8019933540da583c184
-builtAt=2026-09-21T08:06:42
+builtAt=2026-09-21T08:17:36
 touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-rRqV5neA.js
