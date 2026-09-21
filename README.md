@@ -1,270 +1,88 @@
-# mma-dev — MathModel 桌面版「开发版」补丁包（0.0.21，支持自动更新）
+# mma-dev — MathModel 桌面版「开发版」补丁包
 
-> 适用：Windows 上安装的**官方版 MathModel Desktop**（当前基线 v0.0.21 win-x64）。
-> 效果：去掉 MathModel 账号登录 / 平台积分 / 权益到期门槛，保留本地 Agent 全部核心能力，
-> 对话使用你自己配置的模型 API Key（本地直连），不再依赖 `mathmodel.top` 计费服务。
-> 官方发布新版本时，本包可**自动重制并重新应用**（见第三节）。
+给 Windows 上已安装的**官方版 MathModel Desktop**（当前适配 v0.0.21 win-x64）打一个本地开发版：
+免登录、不扣平台积分、不受权益到期限制，并**彻底断开与后台服务器 `mathmodel.top` 的联系**。
+官方发布新版本后，本包可以自动重制并重新应用。
 
 ---
 
-## 一、一键应用（第一次装补丁）
+## 特性
 
-1. 先完全退出 MathModel（托盘里也退出）。
-2. 双击补丁包根目录的：
+- **免登录**：启动即为本地身份，右上角显示「开发者」、徽章「开发版」，无需账号。
+- **不扣积分**：单条对话不再走云端计费，也用不着充值 / 兑换。
+- **不限权益**：桌面权益、有效期之类的门槛全部本地解锁。
+- **断开后台**：不再向后台服务器发送任何请求，遥测上报一并停用。
+- **自带模型**：对话使用你在「设置 → 供应商」里自己填的 API Key，直连服务商。
+- **跟随官方版本**：官方更新后自动重制补丁并重新应用（可注册计划任务）。
+- **可回退**：官方原件有留存，重装官方安装包即可完全还原。
+
+## 运行前提
+
+- Windows + 官方版 MathModel Desktop（当前适配 0.0.21 win-x64）。
+- 依赖 **Node.js 18+**；直接用官方安装包制作时还需要 **7-Zip**。
+- ⚠️ **补丁包必须放在安装目录之外**：官方更新会整体重写安装目录，放在里面的补丁包会被一并删除。
+
+## 快速开始
+
+**1. 首次应用**
+
+先完全退出 MathModel（托盘里也退出），然后双击：
 
 ```
 一键应用开发版.bat
 ```
 
-自动完成：结束残留进程 → 备份官方 `app.asar`（`app.asar.official-backup`）→ 覆盖为开发版 →
-改写 `mathmodel.exe` 内嵌完整性哈希 → 启动程序。
+补丁包不在默认位置时，把安装目录拖到这个 bat 上，或按提示输入路径。
 
-- 默认位置 `<安装目录>\补丁包\MathModelAgent-dev` 会自动识别安装目录；
-- 放在别处时：把**安装目录拖到 bat 上**，或按提示输入路径；
-- 等价 PowerShell：`.\tools\apply-dev.ps1 -AppRoot "C:\...\@mathmodeldesktop"`
+**2. 官方更新后重制**
 
-启动后右上角显示「开发者」、徽章「开发版」即为成功（无需登录）；随后在
-**设置 → 供应商** 填自己的 API Key 即可对话。
+双击 `检查官方更新并重制.bat`：已是开发版且版本未变就什么都不做；检测到官方版则自动重制并应用。
 
----
+**3. 让它自动跟着官方走（推荐）**
 
-## 二、手动「检查官方更新并重制」
+双击 `安装自动更新任务.bat`，注册「登录时 + 每 60 分钟」的检查任务，之后官方更新完会自动变回开发版。
 
-双击 `检查官方更新并重制.bat`（或 `.\tools\auto-pipeline.ps1`）：
+## 常用命令
 
-- 如果安装目录已是开发版且版本未变 → 什么都不做；
-- 如果检测到官方版（官方自动更新完成 / 你重装了官方版）→ 自动重制补丁包并重新应用。
-
-常用参数：
-
-```powershell
-.\tools\auto-pipeline.ps1 -Force                  # 强制重制（即使已是开发版）
-.\tools\auto-pipeline.ps1 -Push                   # 重制后自动 git commit + push
-.\tools\auto-pipeline.ps1 -NoLaunch               # 应用后不自动启动程序
-.\tools\auto-pipeline.ps1 -Mode installer -Installer "D:\下载\mathmodel-setup-0.0.20.exe"
-.\tools\auto-pipeline.ps1 -Mode installer -SourceDir "D:\已解包的官方目录"   # 手动解包后制作
-```
-
----
-
-## 三、自动更新（推荐，已可一键安装）
-
-原理：官方 App 自带 electron-updater，会自动下载安装官方新版本（此时安装目录变回官方版），
-本包的计划任务**每 N 分钟 / 每次登录**检查一次：
-
-```
-检查安装目录 app.asar 是否含开发版标记 /*dev*/
-   ├─ 是开发版且与记录一致  → 什么都不做
-   └─ 是官方版（刚更新完）  → 自动重制补丁包（patched/ + prebuilt/）
-                            → 自动应用回开发版（含 exe 哈希修正）
-                            → 自动重启程序
-                            → 可选: git commit + push
-```
-
-安装计划任务（普通权限即可）：
-
-- 双击 `安装自动更新任务.bat`（默认 60 分钟、不含自动推送），或
-- `.\tools\install-auto-task.ps1 -IntervalMinutes 60 -Push`（`-Push` = 重制后自动 commit + push）
-
-> 本机当前状态：已注册任务 `MathModelAgentDev-AutoPatch`，**登录时 + 每 60 分钟**检查，
-> **不含 `-Push`**（只在本机重制 + 应用开发版，不自动推送到 `github.com/06xxlin/MathModelAgent-dev`）。
-> 需要改频率或开启自动推送时，重新执行上面的命令即可（`-Remove` 可移除任务）。
-
-其它：
-
-```powershell
-.\tools\install-auto-task.ps1 -Remove      # 移除自动任务
-Get-ScheduledTask -TaskName MathModelAgentDev-AutoPatch   # 查看任务
-```
-
-日志：`logs\auto-YYYYMMDD.log`；状态：`.auto-state.json`；
-官方原件留存：`official\app.asar-<版本>`（用于溯源/回退对照）。
-
-依赖：**Node.js 18+**（补丁器要用；脚本首次运行会自动 `npm i @electron/asar`）。
-`installer` 模式解包官方安装包还需要 **7-Zip**（没有则用 `-SourceDir` 手动解包）。
-
----
-
-## 四、原理（为什么必须同时改 2 处）
-
-MathModel 桌面版是 Electron 应用，业务代码在 `<安装目录>\resources\app.asar`。
-补丁只改 asar 内 3 个文件（由 `tools/patch-asar.js` 自动定位锚点）：
-
-| 文件 | 改动 |
+| 目的 | 命令 |
 | --- | --- |
-| `out/main/index.js` | `chargeDesktopConversation` 置空 → 取消每条对话的云端积分计费；**后台基址改成 `http://127.0.0.1:9`（断链）**；**遥测批量上报函数停用** |
-| `out/preload/index.mjs` | 强制启用本地身份（免登录）；`entitlements / credits / 充值 / 兑换 / 通知 / cancelPendingReads` 等桥接改为本地应答 |
-| `out/renderer/assets/index-*.js` | 文案「桌面终生版」→「开发版」 |
+| 应用开发版 | `.\tools\apply-dev.ps1 -AppRoot "<安装目录>"` |
+| 检查官方更新 → 重制 → 应用 | `.\tools\auto-pipeline.ps1` |
+| 强制重制（即使已是开发版） | `.\tools\auto-pipeline.ps1 -Force` |
+| 重制后不自动启动程序 | `.\tools\auto-pipeline.ps1 -NoLaunch` |
+| 用官方安装包制作 | `.\tools\auto-pipeline.ps1 -Mode installer -Installer "D:\下载\mathmodel-setup-0.0.21.exe"` |
+| 用已解包的官方目录制作 | `.\tools\auto-pipeline.ps1 -Mode installer -SourceDir "D:\已解包的官方目录"` |
+| 注册自动任务 | `.\tools\install-auto-task.ps1 -IntervalMinutes 60` |
+| 查看自动任务 | `Get-ScheduledTask -TaskName MathModelAgentDev-AutoPatch` |
+| 移除自动任务 | `.\tools\install-auto-task.ps1 -Remove` |
 
-⚠️ **关键坑**：exe 内嵌 `app.asar` 头部完整性清单：
+## 隐私：断开后台服务器
 
-```
-[{"file":"resources\\app.asar","alg":"SHA256","value":"<64位hex>"}]
-```
+开发版默认不再与后台服务器往来：不发请求、不上报遥测。想更彻底时，可以再加一层 DNS 拦截，并清掉本地已经存下的身份痕迹：
 
-**只替换 app.asar 而不改这串哈希，启动会立刻崩溃**：
+| 目的 | 命令 |
+| --- | --- |
+| 写入 hosts 拦截（需管理员，会弹 UAC） | `.\tools\block-backend.ps1` |
+| 撤销 hosts 拦截 | `.\tools\block-backend.ps1 -Remove` |
+| 预演清理（不动文件） | `.\tools\purge-local-identity.ps1 -WhatIf` |
+| 备份并清理登录态 / 遥测残留 | `.\tools\purge-local-identity.ps1` |
 
-```
-FATAL: electron\shell\common\asar\asar_util.cc Integrity check failed
-```
+清理只处理 App 自己的状态文件，**不动** `workspace\`、`version-history\`、`sdk-config\`、`codex-home\`、`mathmodel.db`
+等你的论文、对话与设置；移除前一律备份到 `%APPDATA%\@mathmodel\_purge-backup-<时间戳>\`。
 
-哈希算法：`SHA256(app.asar 头部 JSON 文本)`（偏移 16 起、长度等于 JSON 本身）。
-`tools/patch-exe-hash.ps1`（纯 PowerShell，无需 Node）与 `patch-exe-hash.js`（Node 版）已实现。
+想恢复后台连接：重制时给补丁器加 `--no-isolation`，并执行 `.\tools\block-backend.ps1 -Remove`。
 
-### 锚点自动识别（版本升级无需手改）
+## 影响范围
 
-`patch-asar.js` 先解出 javascript-obfuscator 的字符串表，再按**字符串值**（如
-`chargeDesktopConversation`）反查十六进制索引定位锚点；preload 用正则匹配
-`--mathmodel-e2e` 判定与 `mathmodel:auth-*` 桥接；renderer 按文案匹配。因此官方重新混淆、
-换版本也能自动适配；若官方新增了未本地化的 `auth-*` 通道，脚本会在报告里给出 ⚠ 警告。
-
-> **0.0.21 的锚点变化**：官方把免登录判定并进了同一条 `const` 语句，形如
-> `const{serverPort:Wt,serverToken:Dt}=Ot,Vt=process.argv.includes("--mathmodel-e2e");`
-> —— 变量前是逗号而不是 `const `，旧正则失配。现已改为按「声明分隔符（`,`/`;`/`{` 或 `const`）+ 变量名 + 赋值」匹配
-> （`tools/patch-asar.js` 第 4.1 节），新旧两种写法都能适配。
-
----
-
-## 五、恢复官方版
-
-- 重新运行官方安装包即可（同时还原 `app.asar` 与 exe 哈希）；
-- 或把 `resources\app.asar.official-backup` 覆盖回 `resources\app.asar` 后重装一次官方版
-  （exe 里被改写的只是一处 64 位 hex，重装最省事）；
-- 别忘了 `.\tools\install-auto-task.ps1 -Remove` 先移除自动任务，否则它会把补丁再打回来。
-
----
-
-## 六、目录结构
-
-```
-MathModelAgent-dev/
-├─ 一键应用开发版.bat          # 首次应用补丁
-├─ 检查官方更新并重制.bat      # 手动检查官方更新 → 自动重制+应用
-├─ 安装自动更新任务.bat        # 注册计划任务（登录时 + 每 N 分钟）
-├─ prebuilt/app.asar           # 开发版 asar（当前基线版本）
-├─ patched/                    # 相对官方被改动的文件（供审阅/重建）
-├─ VERSION                     # 当前补丁包基线信息（版本/哈希/生成时间，自动生成）
-├─ official/                   # 官方 asar 留存（自动生成，不入库）
-├─ tools/
-│  ├─ apply-dev.ps1            # 应用补丁（备份 + 覆盖 + 修哈希）
-│  ├─ patch-exe-hash.ps1/.js   # 修正 exe 内嵌完整性哈希
-│  ├─ patch-asar.js            # 通用补丁器：官方 asar → 开发版 asar（自动锚点）
-│  ├─ rebuild-asar.js          # 用 patched/ 覆盖层重建（等价流程，兼容旧用法）
-│  ├─ auto-pipeline.ps1        # 自动流水线（检测→重制→应用→可选提交）
-│  ├─ block-backend.ps1        # hosts 兜底：后台域名 → 0.0.0.0（-Remove 撤销）
-│  ├─ purge-local-identity.ps1 # 清理本地登录态/遥测残留（先备份，不动用户内容）
-│  ├─ install-auto-task.ps1    # 注册/移除计划任务（schtasks + XML，无需管理员）
-│  └─ read-version.js          # 读取 asar 内版本号
-└─ logs/, .auto-state.json     # 运行日志与状态（自动生成，不入库）
-```
-
----
-
-## 七、注意事项
-
-- 需要官方账号的联网功能（数模广场分享/阅读额度、账号中心、云同步等）在开发版中不可用，
-  不影响本地建模、写论文、绘图、运行 Python/LaTeX 等核心能力。
-- 本包仅用于**你自己拥有合法副本**的软件改造与本地开发，请勿用于规避他人软件的付费授权。
+- **可用**：本地建模、写论文、绘图、Python / LaTeX 环境、自定义模型 API Key、GitHub 插件、官方自动更新。
+- **不可用**：账号中心、权益与积分、数模广场分享 / 阅读、云同步、协作、后台模型代理、飞书 / 微信的后台通道。
 - 数据目录不变：`%APPDATA%\@mathmodel\desktop`。
 
----
+## 恢复官方版
 
-## 八、常见问题（踩过的坑）
-
-### Q1. 官方更新后，软件没有自动变回开发版？
-
-**最常见原因：补丁包被放在了安装目录里面。**
-MathModel 的官方更新是**整体重写安装目录**（所有 exe/dll/resources 都是新时间戳），
-放在安装目录内的补丁包（例如 `<安装目录>\补丁包\MathModelAgent-dev`）会被一起删除，
-于是既没有 prebuilt 可覆盖，计划任务指向的脚本也不存在了 → 更新后停在官方版。
-
-✅ 正确做法：**补丁包必须放在安装目录之外**（本机现在放在
-`C:\Users\lin\MathModel Projects\MathModelAgent-dev`）。
-流水线每次运行也会检查，如果发现补丁包在安装目录内会打印 ⚠⚠ 提醒。
-
-排查与恢复步骤：
-
-```powershell
-# 1) 补丁包是否还在？（不在就从仓库重新克隆到安装目录之外）
-Test-Path "C:\Users\lin\MathModel Projects\MathModelAgent-dev\tools\auto-pipeline.ps1"
-
-# 2) 计划任务指向的路径是否有效
-(Get-ScheduledTask -TaskName "MathModelAgentDev-AutoPatch").Actions.Arguments
-(Get-ScheduledTaskInfo -TaskName "MathModelAgentDev-AutoPatch").LastTaskResult   # 0 = 成功
-
-# 3) 手动跑一次（会检测官方版本 → 重制 → 应用 → 启动）
-.\tools\auto-pipeline.ps1
-```
-
-路径变了（补丁包被移动/重装过）就重新注册任务：
-`.\tools\install-auto-task.ps1 -IntervalMinutes 60 -Push`
-
-### Q2. 任务在跑，但日志里没动作 / 报错？
-
-- 看 `logs\auto-YYYYMMDD.log`（每次运行都有开始/结束行与原因）；
-- `LastTaskResult` 非 0：多为路径失效（脚本被删/被移动）；
-- Node 未安装或 `@electron/asar` 缺失：流水线会自动 `npm i`，若失败请手动在补丁包目录执行 `npm install`。
-- 直接吃官方安装包的 `-Mode installer` 需要 7-Zip。
-
-### Q3. 自动推送失败，日志里出现 "Failed to connect ... over proxy 127.0.0.1"？
-
-本机 git 配了 github 专用代理（`http.https://github.com.proxy`），代理没开时推送会失败。
-流水线**会自动去掉该代理重试一次**；手动推送同样可以：
-
-```powershell
-git -c "http.https://github.com.proxy=" push
-```
-
-### Q4. 想关掉自动重制/自动推送？
-
-```powershell
-.\tools\install-auto-task.ps1 -Remove                                  # 移除计划任务
-.\tools\install-auto-task.ps1 -IntervalMinutes 60                       # 只本地自动，不推送
-```
+1. 先执行 `.\tools\install-auto-task.ps1 -Remove`（否则任务会把补丁打回来）；
+2. 重新运行官方安装包即可完全还原。
 
 ---
 
-## 九、切断与后台服务器的联系（网络隔离）
-
-开发版默认**不再与后台 `mathmodel.top` 有任何往来**，三层保障：
-
-| 层 | 做法 | 位置 |
-| --- | --- | --- |
-| 1. 代码层（核心） | 主进程的后台基址常量 `https://mathmodel.top` → `http://127.0.0.1:9`（discard 端口，本机无监听）。所有远端 `/api/*`（`app-config / me / user / collab / telemetry / proxy / feishu …`）都由这个基址拼出，因此整体断链：请求打到本机立刻失败，**既不解析域名也不外发任何字节** | `tools/patch-asar.js` 第 3 节 |
-| 2. 代码层 | 向 `/api/desktop/telemetry/batch` 上报的函数被整体替换为「直接返回成功」，事件不再外发，本地发件箱也不会堆积重试 | 同上 |
-| 3. DNS 兜底（可选） | hosts 里把后台域名指向 `0.0.0.0`，防止某条路径绕过基址常量按域名直连 | `tools/block-backend.ps1` |
-
-```powershell
-.\tools\block-backend.ps1            # 写入 hosts 拦截（需要管理员，会弹 UAC）
-.\tools\block-backend.ps1 -Remove    # 撤销
-```
-
-### 清除本地身份痕迹
-
-后台之所以能把机器和 QQ 邮箱对上，靠的是本地留存的登录态 + 固定安装 ID：
-
-```powershell
-.\tools\purge-local-identity.ps1           # 备份并移除 auth-store.json / telemetry-outbox.json
-.\tools\purge-local-identity.ps1 -WhatIf   # 只预览要做什么
-```
-
-只动 App 自己的状态文件（`auth-store.json`、`telemetry-outbox.json`、必要时 `Network\Cookies`），
-**绝不触碰** `workspace\`、`version-history\`、`sdk-config\`、`codex-home\`、`mathmodel.db` 等用户内容；
-移除前一律备份到 `%APPDATA%\@mathmodel\_purge-backup-<时间戳>\`，拷回去即可还原。
-
-### 影响范围
-
-- **保留**：本地建模、写论文、绘图、Python/LaTeX 环境、自定义模型 API Key（直连你自己的服务商）、GitHub 插件与官方自动更新。
-- **失效**：账号中心、权益/积分、数模广场分享与阅读、云同步、协作（走后台 WS）、后台模型代理、飞书/微信的后台通道。
-- 校验方式：重制后看 `.auto-report.txt` 里的 `backendBlocked=1` 与 `telemetryStubbed=1`；
-  实测可 `Get-NetTCPConnection` 对比后台域名解析出的 IP，确认没有任何连接。
-
-### 想恢复后台连接
-
-```powershell
-node tools/patch-asar.js --official-asar official\app.asar-0.0.21 --out prebuilt\app.asar --no-isolation ...
-.\tools\block-backend.ps1 -Remove
-```
-
-即 `patch-asar.js` 加 `--no-isolation`（也可用 `--isolation-sentinel <url>` 自定义替换目标）。
-
+本包仅用于**你自己拥有合法副本**的软件改造与本地开发，请勿用于规避他人软件的付费授权。
