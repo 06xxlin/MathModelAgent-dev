@@ -1,6 +1,6 @@
 {
   "name": "mathmodelagent-dev",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "private": true,
   "description": "MathModel 桌面版「开发版」补丁包：去登录/去积分/去权益门槛，并支持官方更新后自动重制",
   "scripts": {

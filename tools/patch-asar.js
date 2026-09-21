@@ -249,10 +249,13 @@ const prePath = path.join(tree, preRel);
 let pre = fs.readFileSync(prePath, 'utf8');
 {
   // 4.1 强制本地身份（免登录）：把 --mathmodel-e2e 判定改为恒真
-  if (/const \w+=!0x0;\/\*dev\*\//.test(pre)) {
+  // 0.0.21 起该声明可能被并入同一条 const 语句，形如
+  //   const{serverPort:Wt,serverToken:Dt}=Ot,Vt=process.argv.includes("--mathmodel-e2e");
+  // 前置是逗号而不是 `const `，所以锚点改为「声明分隔符(, ; { 或 const) + 变量名 + 赋值」。
+  if (/(?:[,;{]\s*|\bconst\s+)[A-Za-z_$][\w$]*=!0x0;\/\*dev\*\//.test(pre)) {
     report.anchors['preload.e2eFlag'] = 'already-patched';
   } else {
-    const r = replaceOnce(pre, /const (\w+)=process\.argv\.includes\("--mathmodel-e2e"\);/, 'const $1=!0x0;/*dev*/', 'preload.e2eFlag');
+    const r = replaceOnce(pre, /([,;{]\s*|\bconst\s+)([A-Za-z_$][\w$]*)=process\.argv\.includes\(["']--mathmodel-e2e"\)/, '$1$2=!0x0;/*dev*/', 'preload.e2eFlag');
     if (!r.ok) throw new Error('preload 本地身份锚点未找到');
     pre = r.content;
   }

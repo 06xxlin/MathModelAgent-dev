@@ -1,5 +1,5 @@
-﻿patchFor=0.0.20
-headerHash=3225d3a0f0b7126f12d7a6d7552982f23ce7aee97d4d73579bf2c8d255aa6cd6
-officialAsarSha256=06458b00b54fdc6ae5c7e00a80b79e5465a6f7bb5a100df266a54736fb6dcbeb
-builtAt=2026-09-14T20:07:10
-touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-OYc102qC.js
+﻿patchFor=0.0.21
+headerHash=2cc5819d4cbd40762ec7dd64db2058c0a09f813a5bbf1e5019313de45939d21d
+officialAsarSha256=b8d92692a84f128465bbe8cc4bc2fbabc4b5271fdb80f8019933540da583c184
+builtAt=2026-09-21T08:06:42
+touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-rRqV5neA.js

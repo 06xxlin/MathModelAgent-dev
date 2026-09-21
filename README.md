@@ -1,6 +1,6 @@
-# mma-dev — MathModel 桌面版「开发版」补丁包（0.0.19，支持自动更新）
+# mma-dev — MathModel 桌面版「开发版」补丁包（0.0.21，支持自动更新）
 
-> 适用：Windows 上安装的**官方版 MathModel Desktop**（当前基线 v0.0.19 win-x64）。
+> 适用：Windows 上安装的**官方版 MathModel Desktop**（当前基线 v0.0.21 win-x64）。
 > 效果：去掉 MathModel 账号登录 / 平台积分 / 权益到期门槛，保留本地 Agent 全部核心能力，
 > 对话使用你自己配置的模型 API Key（本地直连），不再依赖 `mathmodel.top` 计费服务。
 > 官方发布新版本时，本包可**自动重制并重新应用**（见第三节）。
@@ -67,8 +67,8 @@
 - `.\tools\install-auto-task.ps1 -IntervalMinutes 60 -Push`（`-Push` = 重制后自动 commit + push）
 
 > 本机当前状态：已注册任务 `MathModelAgentDev-AutoPatch`，**登录时 + 每 60 分钟**检查，
-> **已开启 `-Push`**（重制后自动推送到 `github.com/06xxlin/MathModelAgent-dev`）。
-> 需要改频率或不推送时，重新执行上面的命令即可（`-Remove` 可移除任务）。
+> **不含 `-Push`**（只在本机重制 + 应用开发版，不自动推送到 `github.com/06xxlin/MathModelAgent-dev`）。
+> 需要改频率或开启自动推送时，重新执行上面的命令即可（`-Remove` 可移除任务）。
 
 其它：
 
@@ -117,6 +117,11 @@ FATAL: electron\shell\common\asar\asar_util.cc Integrity check failed
 `chargeDesktopConversation`）反查十六进制索引定位锚点；preload 用正则匹配
 `--mathmodel-e2e` 判定与 `mathmodel:auth-*` 桥接；renderer 按文案匹配。因此官方重新混淆、
 换版本也能自动适配；若官方新增了未本地化的 `auth-*` 通道，脚本会在报告里给出 ⚠ 警告。
+
+> **0.0.21 的锚点变化**：官方把免登录判定并进了同一条 `const` 语句，形如
+> `const{serverPort:Wt,serverToken:Dt}=Ot,Vt=process.argv.includes("--mathmodel-e2e");`
+> —— 变量前是逗号而不是 `const `，旧正则失配。现已改为按「声明分隔符（`,`/`;`/`{` 或 `const`）+ 变量名 + 赋值」匹配
+> （`tools/patch-asar.js` 第 4.1 节），新旧两种写法都能适配。
 
 ---
 
