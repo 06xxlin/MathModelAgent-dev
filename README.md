@@ -86,3 +86,7 @@
 ---
 
 本包仅用于**你自己拥有合法副本**的软件改造与本地开发，请勿用于规避他人软件的付费授权。
+
+## 欢迎加入
+<img width="130" height="230" alt="bd7c2d58d1cc3a5c2f98f3c44f4ac701" src="https://github.com/user-attachments/assets/ba21454b-c830-4da0-918c-5a2fa0f36ea1" />
+
