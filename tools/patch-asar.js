@@ -394,6 +394,46 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     }
   }
 
+  // ---- 自动更新（4/4）：不要把原始报错堆栈丢到界面上 ----
+  // 官方把更新失败的原因原样塞进 update state 的 message（是 Error.message，里面常带
+  // GitHub 返回的完整 HTTP 头、.method/.url 说明、以及调用栈），渲染层直接整段显示，
+  // 用户会看到一大坨英文堆栈。这里只把「给界面看的」文案换成一句人话，
+  // 真正的报错依旧由 electron-updater 写进 logs\mathmodel-main.log，排查不受影响。
+  if (mainSrc.includes('/*dev-errmsg*/')) {
+    report.anchors['main.updateErrorText'] = 'already-patched';
+  } else {
+    const msgHexes = [];
+    if (dec) {
+      for (const [hex, val] of Object.entries(dec.map)) {
+        if (val === 'message') msgHexes.push(hex);
+      }
+    }
+    const FRIENDLY = '检查更新失败，请稍后重试（详情见日志 mathmodel-main.log）';
+    let errHex = null;
+    for (const hex of msgHexes) {
+      // 形如: function xC(e){const a=_0x…;return e instanceof Error?e[a(0x357)]:String(e);}
+      const re = new RegExp(
+        'function ([\\w$]+)\\(([\\w$]+)\\)\\{const ([\\w$]+)=_0x[0-9a-fA-F]+;' +
+        'return \\2 instanceof Error\\?\\2\\[\\3\\(' + hex + '\\)\\]:String\\(\\2\\);\\}'
+      );
+      const m = re.exec(mainSrc);
+      if (!m) continue;
+      const repl =
+        'function ' + m[1] + '(' + m[2] + '){' +
+        'try{console.error("[desktop-updater] detail: "+(' + m[2] + '&&' + m[2] + '.stack?' + m[2] + '.stack:' + m[2] + '));}catch(_e){}' +
+        'return ' + JSON.stringify(FRIENDLY) + ';/*dev-errmsg*/}';
+      mainSrc = mainSrc.slice(0, m.index) + repl + mainSrc.slice(m.index + m[0].length);
+      errHex = hex;
+      break;
+    }
+    if (errHex) {
+      report.anchors['main.updateErrorText'] = 'sanitized(' + errHex + ')';
+      console.log('      更新报错文案已简化（原始堆栈只进日志，不再显示在界面上）');
+    } else {
+      report.warnings.push('[main.updateErrorText] 未定位到更新错误文案函数（界面可能仍显示原始报错）');
+    }
+  }
+
   fs.writeFileSync(mainPath, mainSrc);
   report.touched.push(mainRel);
 }

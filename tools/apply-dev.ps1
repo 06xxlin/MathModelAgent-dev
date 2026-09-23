@@ -84,8 +84,11 @@ if ($UpdateRepo -ne "-") {
     "releaseType: release",
     "channel: $UpdateChannel",
     "updaterCacheDirName: $cache"
-  ) -join "`r`n"
-  [System.IO.File]::WriteAllText($yml, $yaml + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+  ) -join "`n"
+  # 必须用 LF 换行：主进程自己那个简陋的 YAML 解析器按 '\n' 切行，
+  # 再用 /^(\w+):\s*(.+)$/ 匹配。CRLF 时行尾的 \r 会让 '.' 匹配失败，
+  # 解析结果为空 → 程序判定「没有配置更新源」→ 自动更新被自己关掉。
+  [System.IO.File]::WriteAllText($yml, $yaml + "`n", (New-Object System.Text.UTF8Encoding($false)))
   Write-Host "    更新源已改为 GitHub Release: $UpdateRepo (channel=$UpdateChannel)"
 }
 
