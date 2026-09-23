@@ -13,6 +13,8 @@
 - **不限权益**：桌面权益、有效期之类的门槛全部本地解锁。
 - **断开后台**：不再向后台服务器发送任何请求，遥测上报一并停用。
 - **自带模型**：对话使用你在「设置 → 供应商」里自己填的 API Key，直连服务商。
+- **更新走自己的仓库**：内置的「检查更新」已从官方仓库改成你自己的 GitHub Release，
+  发布新版本后客户端能自己发现并升级（见下节）。
 - **跟随官方版本**：官方更新后自动重制补丁并重新应用（可注册计划任务）。
 - **可回退**：官方原件有留存，重装官方安装包即可完全还原。
 
@@ -74,6 +76,57 @@
 
 > 分发前请确认源安装目录已经是开发版：脚本会校验 `app.asar` 里的 `/*dev*/` 标记，不是开发版会直接报错退出。
 
+## 内置自动更新（指向你自己的 GitHub Release）
+
+程序自带的「检查更新」由 electron-updater 驱动，配置在 `resources\app-update.yml`。
+打补丁时会把它从官方仓库改成你的仓库（默认 `06xxlin/MathModelAgent-dev`）：
+
+```yaml
+owner: 06xxlin
+repo: MathModelAgent-dev
+provider: github
+releaseType: release
+channel: latest
+```
+
+补丁器同时会**放行未签名的更新包**。官方 hook 掉了 electron-updater 的
+`verifyUpdateCodeSignature`：安装包内嵌的 publisher 证书不在白名单里就直接拒绝更新，
+而官方构建里那个白名单甚至是空数组（源码里是个空字符串占位），等于**任何更新都会被拒**。
+我们自制的安装包没有代码签名，不放行的话「检查到新版本 → 下载完成 → 安装」最后一步必定失败。
+
+**发布一个新版本（客户端才能收到更新）**
+
+```powershell
+# 1) 重制开发版并应用（会带上新的 app-update.yml）
+.\tools\auto-pipeline.ps1 -Force -NoLaunch
+# 2) 封装安装包
+.\installer\make-setup.ps1
+# 3) 生成 latest.yml 并发布到 GitHub Release（需先 gh auth login）
+.\installer\publish-release.ps1 -Upload
+```
+
+`publish-release.ps1` 产出 `dist\release\`：
+
+| 文件 | 作用 |
+| --- | --- |
+| `mathmodel-<版本>-dev-x64-setup.exe` | 安装包（已改名成 release 里的资产名） |
+| `latest.yml` | **必须有**：版本号 / 文件名 / sha512 / 字节数，客户端靠它比对版本 |
+| `SHA256SUMS.txt` | 校验和 |
+
+> 关键：**客户端版本号必须低于 latest.yml 里的版本**才会看到更新。
+> 例如现在装的是 0.0.22，就发 0.0.23；只传 setup.exe、不传 latest.yml 是识别不到的。
+
+装好之后的更新链路（安装包会处理 electron-updater 传的 `--updated` / `--force-run`：
+跳过向导页、装完自动重启）：
+
+```
+启动 → 检查更新 → 比对 latest.yml → 下载 → 校验 sha512 → 放行签名 → quitAndInstall
+     → setup.exe --updated --force-run → 覆盖安装 → 自动重启
+```
+
+**换仓库**：给 `auto-pipeline.ps1` / `apply-dev.ps1` 传 `-UpdateRepo owner/repo`
+（`-UpdateRepo -` 表示保留官方更新源）。
+
 ## 隐私：断开后台服务器
 
 开发版默认不再与后台服务器往来：不发请求、不上报遥测。想更彻底时，可以再加一层 DNS 拦截，并清掉本地已经存下的身份痕迹：
@@ -86,12 +139,15 @@
 | 官方 0.0.22 起把该地址藏进混淆字符串表 | 补丁器先解字符串表拿到索引，再把所有解码调用点换成哨兵地址（不再依赖明文锚点） |
 | 遥测批量上报 `/api/desktop/telemetry/batch` | 对应函数整体替换为「直接返回成功」，事件不再外发、本地发件箱不再堆积 |
 | 界面里的官网链接（website / home / changelog / 分享卡片） | 文本级清除为哨兵地址，点不出去 |
+| 更新包签名白名单 | 改写成恒通过，否则未签名的开发版更新包装不上（详见上一节） |
 | 域名解析 | hosts 把 `mathmodel.top` / `www.mathmodel.top` 指向 `0.0.0.0`（汇点） |
 
 **仍然会出网、但与本项目无关的请求**（如需一并封掉请告知）：
 
-- `github.com` / `api.github.com` / `raw.githubusercontent.com` —— electron-updater 的官方更新检查，
-  也就是「跟着官方版本走」这条链路本身；想关掉可在环境变量里设 `MATHMODEL_DISABLE_AUTO_UPDATE=1`。
+- `github.com` / `api.github.com` / `objects.githubusercontent.com` —— **你自己的更新检查**：
+  查 `06xxlin/MathModelAgent-dev` 的 Release、下载新版安装包。这是自动更新的载体本身；
+  想关掉可在环境变量里设 `MATHMODEL_DISABLE_AUTO_UPDATE=1`，或用
+  `dev-tools\switch-auto-update.ps1 -Disable`。**它不会访问 `mathmodel.top`。**
 - `models.dev` —— 第三方模型目录（供应商/模型列表校准）。
 - 你自己在「设置 → 供应商」里配置的模型服务商 API（Anthropic / DeepSeek / …），这是对话本身要用的。
 

@@ -19,6 +19,8 @@ param(
   [ValidateSet('local', 'installer')][string]$Mode = 'local',
   [string]$Installer = "",
   [string]$SourceDir = "",
+  [string]$UpdateRepo = "06xxlin/MathModelAgent-dev",
+  [string]$UpdateChannel = "latest",
   [switch]$Push,
   [switch]$NoApply,
   [switch]$NoLaunch,
@@ -260,7 +262,7 @@ if (-not (Test-Path -LiteralPath $keep)) {
 $shouldApply = ($Mode -eq 'local') -and (-not $NoApply)
 if ($shouldApply) {
   Log "应用到安装目录 …" -color Cyan
-  & (Join-Path $tools "apply-dev.ps1") -AppRoot $appRoot -Asar $prebuilt
+  & (Join-Path $tools "apply-dev.ps1") -AppRoot $appRoot -Asar $prebuilt -UpdateRepo $UpdateRepo -UpdateChannel $UpdateChannel
   if ($LASTEXITCODE -ne 0) { throw "应用失败（退出码 $LASTEXITCODE）" }
   $installedHash = (Get-FileHash -LiteralPath (Join-Path $appRoot "resources\app.asar") -Algorithm SHA256).Hash.ToLower()
   if (-not $NoLaunch) {

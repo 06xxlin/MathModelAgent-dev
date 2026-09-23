@@ -357,6 +357,43 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     }
   }
 
+  // ---- 自动更新（3/3）：放行「没有代码签名」的开发版更新包 ----
+  // 官方 hook 掉了 electron-updater 的 verifyUpdateCodeSignature：安装包内嵌的 publisher
+  // 证书不在白名单里就直接拒绝更新。而且官方构建里那个白名单是空数组
+  // （源码里是个空字符串占位），等于**任何更新都会被拒**。
+  // 我们自制的开发版 setup 没有代码签名（签名要买证书），所以必须把这个钩子改成恒通过，
+  // 否则「检查到新版本 → 下载完成 → 安装」最后一步必定失败。
+  if (mainSrc.includes('/*dev-nosig*/')) {
+    report.anchors['main.verifySign'] = 'already-patched';
+  } else {
+    const sigHexes = [];
+    if (dec) {
+      for (const [hex, val] of Object.entries(dec.map)) {
+        if (val === 'verifyUpdateCodeSignature') sigHexes.push(hex);
+      }
+    }
+    let sigDone = null;
+    for (const hex of sigHexes) {
+      // 形如:  _0x312d5c[_0x2d97e3(0xb0c)]=(_0x2733d5,_0x353fd5)=>{ ... }
+      const re = new RegExp('\\[[\\w$]+\\((' + hex + ')\\)\\]=(\\([\\w$,\\s]*\\)|[\\w$]+)=>\\{');
+      const m = re.exec(mainSrc);
+      if (!m) continue;
+      const braceIdx = m.index + m[0].length - 1;
+      if (mainSrc[braceIdx] !== '{') continue;
+      const end = extractBalanced(mainSrc, braceIdx);
+      mainSrc = mainSrc.slice(0, braceIdx) + '{return Promise.resolve(null);/*dev-nosig*/}' + mainSrc.slice(end + 1);
+      sigDone = hex;
+      break;
+    }
+    if (sigDone) {
+      report.anchors['main.verifySign'] = 'disabled(' + sigDone + ')';
+      report.signatureGateDisabled = true;
+      console.log('      更新包签名校验已放行（未签名的开发版更新包可正常安装）');
+    } else {
+      report.warnings.push('[main.verifySign] 未定位到 verifyUpdateCodeSignature 钩子（未签名更新包可能被拒绝）');
+    }
+  }
+
   fs.writeFileSync(mainPath, mainSrc);
   report.touched.push(mainRel);
 }

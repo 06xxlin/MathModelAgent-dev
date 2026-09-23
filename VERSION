@@ -1,5 +1,5 @@
 ﻿patchFor=0.0.22
-headerHash=faf2e01683e383e4e06f3fe5e0c9cb958fcdeec3ca731ac2538eab0cd8c5519d
+headerHash=fa9350bbd042999b8a1e77d0ab8df31609f3c57c468545eb4396b431d5a4ce9c
 officialAsarSha256=c7bafb35abfee0e67058b05d5ba781cd057ba4b69145bc19230f75b7a7429c08
-builtAt=2026-09-23T08:05:41
+builtAt=2026-09-23T08:44:32
 touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-BusS5Jwo.js,out/renderer/assets/SettingsPage-BWWiLS5h.js

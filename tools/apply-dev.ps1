@@ -4,11 +4,17 @@
 #   .\tools\apply-dev.ps1 -AppRoot "官方安装根目录(含 mathmodel.exe)"
 #   可选: -Asar <开发版 app.asar 路径>   默认用 prebuilt\app.asar
 #   可选: -NoKill                        不自动结束正在运行的 mathmodel
+#   可选: -UpdateRepo "owner/repo"        内置更新检查指向的 GitHub 仓库
+#                                         （默认 06xxlin/MathModelAgent-dev；传 - 表示不改）
+#   可选: -UpdateChannel latest|beta      更新通道，默认 latest
 #
 # 做的事: 结束进程 → 备份官方 app.asar → 覆盖为开发版 → 改写 exe 内嵌完整性哈希
+#         → 把 resources\app-update.yml 的更新源指向你自己的 GitHub Release
 param(
   [Parameter(Mandatory = $true)][string]$AppRoot,
   [string]$Asar = "",
+  [string]$UpdateRepo = "06xxlin/MathModelAgent-dev",
+  [string]$UpdateChannel = "latest",
   [switch]$NoKill
 )
 
@@ -50,6 +56,38 @@ Write-Host "    $Asar  ->  $cur"
 
 Write-Host "==> 改写 exe 内嵌完整性哈希 …" -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot "patch-exe-hash.ps1") -Exe $exe.FullName -Asar $cur
+
+# ---------- 内置更新检查：改指向自己的 GitHub Release ----------
+# 程序启动时会读 resources\app-update.yml 决定去哪儿查更新（electron-updater 的 github provider）。
+# 这个文件在 asar 外面，所以单独改写；官方安装包/官方更新会把它重置回 jihe520/MathModelAgent。
+if ($UpdateRepo -ne "-") {
+  $yml = Join-Path $res "app-update.yml"
+  $ymlBak = Join-Path $res "app-update.yml.official-backup"
+  if ((Test-Path -LiteralPath $yml) -and -not (Test-Path -LiteralPath $ymlBak)) {
+    Copy-Item -LiteralPath $yml -Destination $ymlBak -Force
+    Write-Host "    已备份官方 app-update.yml" -ForegroundColor Gray
+  }
+  if ($UpdateRepo -notmatch '^[^/\s]+/[^/\s]+$') {
+    throw "-UpdateRepo 需要 owner/repo 形式，例如 06xxlin/MathModelAgent-dev（当前: $UpdateRepo）"
+  }
+  $parts = $UpdateRepo.Split('/')
+  # updaterCacheDirName 沿用官方值，别动（改了会换缓存目录）
+  $cache = "'@mathmodeldesktop-updater'"
+  if (Test-Path -LiteralPath $yml) {
+    $m = [regex]::Match((Get-Content -LiteralPath $yml -Raw), "updaterCacheDirName:\s*(.+)")
+    if ($m.Success) { $cache = $m.Groups[1].Value.Trim() }
+  }
+  $yaml = @(
+    "owner: $($parts[0])",
+    "repo: $($parts[1])",
+    "provider: github",
+    "releaseType: release",
+    "channel: $UpdateChannel",
+    "updaterCacheDirName: $cache"
+  ) -join "`r`n"
+  [System.IO.File]::WriteAllText($yml, $yaml + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+  Write-Host "    更新源已改为 GitHub Release: $UpdateRepo (channel=$UpdateChannel)"
+}
 
 Write-Host ""
 Write-Host "全部完成！双击启动: $($exe.FullName)" -ForegroundColor Green

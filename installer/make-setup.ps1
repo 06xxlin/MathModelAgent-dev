@@ -142,12 +142,17 @@ MathModel $Version 开发版 —— 说明
        右键以管理员身份运行 PowerShell，执行：
        powershell -ExecutionPolicy Bypass -File "dev-tools\block-backend.ps1"
 
-4. 仍然会出网的请求（与本项目无关）
-   - github.com / api.github.com：electron-updater 的官方更新检查
-     【重要】官方一推送新版本，更新程序会把开发版整个覆盖回官方版（登录 / 积分门槛又回来）。
-     如果你不希望被覆盖，右键以管理员身份与否均可，执行：
-         powershell -ExecutionPolicy Bypass -File "dev-tools\switch-auto-update.ps1" -Disable
-     之后每次启动仍是开发版；想恢复官方更新就再执行 -Enable。
+4. 内置自动更新（指向本项目自己的 GitHub Release）
+   启动后会自动检查更新，发现新版本会后台下载；界面提示后点一下即可重启升级。
+   更新源就写在本程序 resources\app-update.yml 里（默认 06xxlin/MathModelAgent-dev），
+   下载完会校验 sha512，装完自动重启，仍然是开发版（不会变成官方版）。
+   想临时关掉自动更新：
+
+       powershell -ExecutionPolicy Bypass -File "dev-tools\switch-auto-update.ps1" -Disable
+       （恢复：把 -Disable 换成 -Enable；改完要完全退出再启动程序）
+
+   仍然会出网的其他请求：
+   - github.com / api.github.com：上面这条更新检查（不访问 mathmodel.top）
    - models.dev：第三方模型目录
    - 你自己配置的模型服务商 API
 
@@ -203,7 +208,19 @@ VIAddVersionKey /LANG=2052 "LegalCopyright"  "Community dev build"
 
 !define MUI_ABORTWARNING
 
+; 由内置更新程序（electron-updater）拉起时命令行为 "--updated [--force-run]"：
+; 这时跳过欢迎/目录/完成页，只留安装进度，装完按需自动重启程序。
+Var IsUpdate
+Var ForceRun
+
+Function SkipIfUpdate
+  StrCmp $IsUpdate "1" 0 +2
+  Abort
+FunctionEnd
+
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdate
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdate
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
@@ -211,6 +228,7 @@ VIAddVersionKey /LANG=2052 "LegalCopyright"  "Community dev build"
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\dev-tools\使用说明.txt"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "查看开发版说明（强烈建议先看）"
 !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdate
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -223,6 +241,20 @@ Function .onInit
   nsExec::ExecToLog 'taskkill /IM ${APP_EXE} /F'
   Pop $0
   Sleep 1200
+
+  StrCpy $IsUpdate "0"
+  StrCpy $ForceRun "0"
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "--updated" $R1
+  IfErrors updDone
+    StrCpy $IsUpdate "1"
+  updDone:
+  ClearErrors
+  ${GetOptions} $R0 "--force-run" $R1
+  IfErrors runDone
+    StrCpy $ForceRun "1"
+  runDone:
 FunctionEnd
 
 Section "MathModel 开发版" SEC_MAIN
@@ -254,6 +286,10 @@ Section "MathModel 开发版" SEC_MAIN
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   IntFmt $0 "0x%08X" $0
   WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
+
+  ; 内置更新（electron-updater）会带 --force-run，装完自动把程序拉起来
+  StrCmp $ForceRun "1" 0 +2
+    Exec '"$INSTDIR\${APP_EXE}"'
 SectionEnd
 
 Section "Uninstall"
