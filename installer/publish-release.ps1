@@ -104,7 +104,33 @@ if ($Upload) {
   if (-not $gh) { throw "没找到 gh（GitHub CLI）。请先安装：winget install GitHub.cli" }
   $env:GH_PROMPT_DISABLED = '1'
   & $gh auth status *> $null
-  if ($LASTEXITCODE -ne 0) { throw "gh 未登录。请先在本机执行一次: gh auth login" }
+  if ($LASTEXITCODE -ne 0) {
+    # gh 没登录时退回一步：用本机 Git 凭据管理器里已经存好的 GitHub 凭据
+    # （就是平时 git push 用的那套，Windows 凭据管理器里的 ghp_…）
+    Say "gh 未登录，改用本机已保存的 GitHub 凭据 …" Yellow
+    $tmp = Join-Path $env:TEMP ("mma-cred-" + [guid]::NewGuid().ToString('N'))
+    $reqF = "$tmp.req"; $outF = "$tmp.out"; $errF = "$tmp.err"
+    [System.IO.File]::WriteAllText($reqF, "protocol=https`nhost=github.com`n`n", (New-Object System.Text.UTF8Encoding($false)))
+    $prevEap = $ErrorActionPreference
+    try {
+      $ErrorActionPreference = 'Continue'
+      Start-Process -FilePath "git" -ArgumentList 'credential', 'fill' `
+        -RedirectStandardInput $reqF -RedirectStandardOutput $outF -RedirectStandardError $errF `
+        -NoNewWindow -Wait | Out-Null
+    } finally { $ErrorActionPreference = $prevEap }
+    $raw = Get-Content -LiteralPath $outF -Raw -ErrorAction SilentlyContinue
+    Remove-Item $reqF, $outF, $errF -Force -ErrorAction SilentlyContinue
+    $mp = if ($raw) { [regex]::Match($raw, '(?m)^password=(.+)$') } else { $null }
+    if (-not $mp -or -not $mp.Success) {
+      throw "gh 未登录，本机也取不到已保存的 GitHub 凭据。请先执行一次: gh auth login"
+    }
+    $env:GH_TOKEN = $mp.Groups[1].Value.Trim()
+    $mu = [regex]::Match($raw, '(?m)^username=(.+)$')
+    $who = if ($mu.Success) { $mu.Groups[1].Value.Trim() } else { '(unknown)' }
+    Say "  已取到账号 $who 的凭据（仅本次运行使用，不落盘）" Gray
+    & $gh auth status *> $null
+    if ($LASTEXITCODE -ne 0) { throw "取到的凭据无法通过 gh 校验，请改用 gh auth login" }
+  }
 
   if ($Notes -eq "") { $Notes = "MathModel 开发版 v$Version`n`n- 免登录 / 不扣积分 / 后台服务器已切断`n- 内置更新检查指向本仓库 Release" }
 
