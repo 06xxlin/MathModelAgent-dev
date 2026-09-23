@@ -244,9 +244,15 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
   if (!patched) throw new Error('主进程计费锚点未找到（chargeDesktopConversation 赋值）');
 
   // ---- 网络隔离（1/2）：把后台基址换成不可达的本地地址 ----
-  // 官方写法: Bl = app.isPackaged ? 'https://mathmodel.top' : <origin 校验函数>
-  // 所有远端 /api/* 请求（app-config / me / user / collab / telemetry / proxy …）都由这个基址拼出，
-  // 换掉它 = 整体断链：请求会打到本机未监听端口并立刻失败，不解析域名、不产生任何外发流量。
+  // 所有远端 /api/* 请求（app-config / me / user / credits / collab / telemetry / proxy …）
+  // 都由这个基址拼出，换掉它 = 整体断链：请求打到本机未监听端口并立刻失败，
+  // 既不解析域名、也不产生任何外发流量。
+  //
+  // 锚点有两种写法，都要支持（版本无关）：
+  //   A. <= 0.0.21：明文出现  Xl = app.isPackaged ? 'https://mathmodel.top' : <校验函数>
+  //   B. >= 0.0.22：字符串被搬进 javascript-obfuscator 字符串表，源码里只剩解码调用
+  //      Xl = _0x46b75a[_0xfd3c65(0x1521)] ? _0xfd3c65(0x7bf) : function(…)
+  //      → 先解表拿到 0x7bf 这种索引，再把所有 X(0x7bf) 调用点换成哨兵字面量。
   if (noIsolation) {
     report.anchors['main.backendBase'] = 'skipped(--no-isolation)';
     console.log('      ⚠ 已按 --no-isolation 跳过后台断链');
@@ -255,15 +261,40 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     if (mainSrc.includes(sentinelLiteral)) {
       report.anchors['main.backendBase'] = 'already-patched';
     } else {
-      const re = /(['"])https:\/\/mathmodel\.top\1/g;
+      let blocked = 0;
+      const details = [];
+
+      // (A) 明文字面量
+      const re = /(['"])https?:\/\/(?:www\.)?mathmodel\.top\1/g;
       const hits = mainSrc.match(re) || [];
-      if (hits.length === 0) {
-        report.warnings.push('[main.backendBase] 未找到后台基址字面量 ' + backendUrl + '（官方可能改了写法，断链未生效）');
-      } else {
+      if (hits.length) {
         mainSrc = mainSrc.replace(re, sentinelLiteral);
-        report.anchors['main.backendBase'] = hits.length;
-        report.backendBlocked = hits.length;
-        console.log('      后台基址已切断: ' + backendUrl + ' -> ' + isolationSentinel + '（' + hits.length + ' 处）');
+        blocked += hits.length;
+        details.push('literal x' + hits.length);
+      }
+
+      // (B) 混淆字符串表
+      const baseHexes = [];
+      if (dec) {
+        for (const [hex, val] of Object.entries(dec.map)) {
+          if (typeof val === 'string' && /^https?:\/\/(?:www\.)?mathmodel\.top$/i.test(val)) baseHexes.push(hex);
+        }
+      }
+      for (const hex of baseHexes) {
+        const callRe = new RegExp('_0x[0-9a-fA-F]+\\(' + hex + '\\)', 'g');
+        const n = (mainSrc.match(callRe) || []).length;
+        if (!n) continue;
+        mainSrc = mainSrc.replace(callRe, sentinelLiteral);
+        blocked += n;
+        details.push('stringTable[' + hex + '] x' + n);
+      }
+
+      if (blocked) {
+        report.anchors['main.backendBase'] = details.join(', ');
+        report.backendBlocked = blocked;
+        console.log('      后台基址已切断: ' + backendUrl + ' -> ' + isolationSentinel + '（' + details.join('、') + '）');
+      } else {
+        report.warnings.push('[main.backendBase] 未找到后台基址（明文或字符串表均未命中，断链未生效）');
       }
     }
   }
@@ -271,20 +302,56 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
   // ---- 网络隔离（2/2）：停用遥测批量上报 ----
   // 找到向 /api/desktop/telemetry/batch POST 的那个函数，整体替换为「直接返回成功」，
   // 这样事件不再外发、本地发件箱也不会一直堆积重试。
+  // 端点字符串同样可能被搬进混淆字符串表，所以按「解表得到的索引」而不是写死的十六进制定位。
   if (noIsolation) {
     report.anchors['main.telemetryBatch'] = 'skipped(--no-isolation)';
   } else if (mainSrc.includes('/*dev-notel*/')) {
     report.anchors['main.telemetryBatch'] = 'already-patched';
   } else {
-    const telRe = /(?:async\s+)?function (\w+)\((\w+)\)\{const (\w+)=_0x[0-9a-fA-F]+(?:\(\))?;if\(0x0===\2\[\3\(0x73f\)\]\)return!0x0;const \w+=await \w+\(\3\(0x8e8\)/;
-    const tm = telRe.exec(mainSrc);
+    const telHexes = new Set(['0x8e8', '0x4de']); // 已知历史版本内联索引（兜底）
+    if (dec) {
+      for (const [hex, val] of Object.entries(dec.map)) {
+        if (val === '/api/desktop/telemetry/batch') telHexes.add(hex);
+      }
+    }
+
+    let tm = null, telHexUsed = null;
+    for (const hex of telHexes) {
+      const strict = new RegExp(
+        '(?:async\\s+)?function (\\w+)\\((\\w+)\\)\\{const (\\w+)=_0x[0-9a-fA-F]+(?:\\(\\))?;' +
+        'if\\(0x0===\\2\\[\\3\\(0x[0-9a-fA-F]+\\)\\]\\)return!0x0;' +
+        'const \\w+=await \\w+\\(\\3\\(' + hex + '\\)'
+      );
+      const m = strict.exec(mainSrc);
+      if (m) { tm = m; telHexUsed = hex; break; }
+    }
+
+    // 宽松兜底：先找到「await X(Y(<hex>))」调用点，再回退到最近的函数声明
+    if (!tm) {
+      for (const hex of telHexes) {
+        const callRe = new RegExp('await \\w+\\(\\w+\\(' + hex + '\\)');
+        const cm = callRe.exec(mainSrc);
+        if (!cm) continue;
+        const before = mainSrc.slice(0, cm.index);
+        const fm = /(?:async\s+)?function (\w+)\((\w+)\)\{/g;
+        let last = null, m2;
+        while ((m2 = fm.exec(before))) last = m2;
+        if (!last) continue;
+        const bodyEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', last.index));
+        if (bodyEnd - last.index > 4000) continue; // 太远，可能不是遥测函数，放弃
+        tm = { index: last.index, 1: last[1], 2: last[2] };
+        telHexUsed = hex + '(loose)';
+        break;
+      }
+    }
+
     if (!tm) {
       report.warnings.push('[main.telemetryBatch] 未定位到遥测批量上传函数（跳过；断链已由基址替换保证）');
     } else {
       const fnStart = tm.index;
       const fnEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', fnStart));
       mainSrc = mainSrc.slice(0, fnStart) + 'async function ' + tm[1] + '(' + tm[2] + '){return!0x0;/*dev-notel*/}' + mainSrc.slice(fnEnd + 1);
-      report.anchors['main.telemetryBatch'] = 'stubbed';
+      report.anchors['main.telemetryBatch'] = 'stubbed(' + telHexUsed + ')';
       report.telemetryStubbed = true;
       console.log('      遥测上报已停用: ' + tm[1] + '() → 直接返回成功（事件不再外发）');
     }
@@ -387,6 +454,40 @@ if (!rendererChanged) {
   if (!already) report.warnings.push('renderer 文案锚点「桌面终生版」未找到');
 }
 
+// ---------------- 5b. 后台域名的文本级清除（界面/预加载/其它文本资源） ----------------
+// 渲染层还留着一批指向官网的链接常量（website / home / desktopChangelog / 分享卡片 …）。
+// 它们不会自己发请求，但点一下就会带着后台域名出网；这里统一清成哨兵地址，
+// 配合 hosts 汇点，做到「界面里也没有任何通往后台的出口」。
+if (!noIsolation) {
+  const TEXT_EXT = new Set(['.js', '.mjs', '.cjs', '.jsx', '.ts', '.json', '.html', '.htm', '.css', '.txt', '.md']);
+  const domainRe = /https?:\/\/(?:www\.)?mathmodel\.top/gi;
+  let linkHits = 0;
+  const linkFiles = [];
+  (function walk(dir) {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === 'node_modules') continue;
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) { walk(p); continue; }
+      if (!TEXT_EXT.has(path.extname(ent.name).toLowerCase())) continue;
+      if (fs.statSync(p).size > 32 * 1024 * 1024) continue;
+      const c = fs.readFileSync(p, 'utf8');
+      const hits = c.match(domainRe);
+      if (!hits) continue;
+      const rel = path.relative(tree, p).split(path.sep).join('/');
+      fs.writeFileSync(p, c.replace(domainRe, isolationSentinel));
+      linkHits += hits.length;
+      linkFiles.push(rel + ' x' + hits.length);
+      if (!report.touched.includes(rel)) report.touched.push(rel);
+    }
+  })(tree);
+  report.backendLinkRewrites = linkHits;
+  if (linkHits) {
+    console.log('      界面后台链接已清除: ' + linkFiles.join('、'));
+  } else if (!report.backendBlocked) {
+    report.warnings.push('[renderer.links] 未在界面资源里找到后台域名，请人工确认');
+  }
+}
+
 // ---------------- 6. 重新打包 ----------------
 console.log('[6/6] 重新打包 …');
 fs.mkdirSync(path.dirname(outAsar), { recursive: true });
@@ -440,6 +541,7 @@ if (reportPath) {
     'unpackDirs=' + (report.unpackDirs || []).join(','),
     'touched=' + (report.touched || []).join(','),
     'backendBlocked=' + (report.backendBlocked || 0),
+    'backendLinkRewrites=' + (report.backendLinkRewrites || 0),
     'telemetryStubbed=' + (report.telemetryStubbed ? 1 : 0),
     'warnings=' + (report.warnings || []).join(' | '),
   ];

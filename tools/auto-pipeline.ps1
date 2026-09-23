@@ -48,10 +48,30 @@ function Log([string]$m) {
 function Resolve-AppRoot([string]$given) {
   $cands = @()
   if ($given -ne "") { $cands += $given }
+  # 官方换过安装目录名：0.0.17~0.0.19 用 @mathmodeldesktop，0.0.20+ 用 mathmodel
+  $cands += (Join-Path $env:LOCALAPPDATA "Programs\mathmodel")
   $cands += (Join-Path $env:LOCALAPPDATA "Programs\@mathmodeldesktop")
   $cands += (Join-Path (Split-Path $PackageRoot -Parent) "")
+  # 最可靠的一路：直接问注册表的卸载项
+  try {
+    foreach ($k in @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+      foreach ($p in (Get-ItemProperty $k -ErrorAction SilentlyContinue)) {
+        if ($p.DisplayName -notlike '*mathmodel*') { continue }
+        if ($p.InstallLocation) { $cands += $p.InstallLocation }
+        if ($p.UninstallString) {
+          $u = ($p.UninstallString -replace '^"', '') -replace '".*$', ''
+          if ($u) { $cands += (Split-Path -Parent $u) }
+        }
+      }
+    }
+  } catch { }
   foreach ($c in $cands) {
-    if ($c -and (Test-Path -LiteralPath (Join-Path $c "mathmodel.exe"))) { return (Resolve-Path -LiteralPath $c).Path }
+    if (-not $c) { continue }
+    if (-not (Test-Path -LiteralPath $c)) { continue }
+    if (Test-Path -LiteralPath (Join-Path $c "mathmodel.exe")) { return (Resolve-Path -LiteralPath $c).Path }
   }
   return $null
 }
