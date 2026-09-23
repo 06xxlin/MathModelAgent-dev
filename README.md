@@ -56,6 +56,24 @@
 | 查看自动任务 | `Get-ScheduledTask -TaskName MathModelAgentDev-AutoPatch` |
 | 移除自动任务 | `.\tools\install-auto-task.ps1 -Remove` |
 
+**4. 封装成一个 setup 安装包（分发给别的机器）**
+
+双击 `封装安装包.bat`，或用：
+
+| 目的 | 命令 |
+| --- | --- |
+| 默认（自动找安装目录与版本） | `.\installer\make-setup.ps1` |
+| 指定安装目录 / 版本 / 输出 | `.\installer\make-setup.ps1 -AppRoot "D:\xx\mathmodel" -Version 0.0.22 -OutFile "D:\发布\MathModel-Setup.exe"` |
+| 保留暂存目录（排查用） | `.\installer\make-setup.ps1 -KeepStage` |
+
+产物默认落在 `dist\MathModel-<版本>-开发版-Setup.exe`（约 350 MB，单文件、离线、免管理员）。
+
+它做的事：把**当前已打好补丁的安装目录**整体打包成 NSIS 安装包 ——
+装完即开发版（免登录 / 不扣积分 / 后台已切断），带桌面与开始菜单快捷方式、
+「应用和功能」卸载入口、以及 `dev-tools\`（后台拦截脚本 + 使用说明）。
+
+> 分发前请确认源安装目录已经是开发版：脚本会校验 `app.asar` 里的 `/*dev*/` 标记，不是开发版会直接报错退出。
+
 ## 隐私：断开后台服务器
 
 开发版默认不再与后台服务器往来：不发请求、不上报遥测。想更彻底时，可以再加一层 DNS 拦截，并清掉本地已经存下的身份痕迹：

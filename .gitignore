@@ -12,3 +12,6 @@ package-lock.json
 logs/
 official/
 prebuilt/*.hash.txt
+
+# 封装 setup 安装包的产物与暂存目录（单个 ~350MB，不入库）
+dist/
