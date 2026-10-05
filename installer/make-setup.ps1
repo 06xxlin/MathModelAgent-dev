@@ -119,7 +119,7 @@ if ($LASTEXITCODE -gt 7) { throw "robocopy 失败（退出码 $LASTEXITCODE）" 
 # 随包附带的后台拦截 / 痕迹清理脚本
 $devTools = Join-Path $payload "dev-tools"
 New-Item -ItemType Directory -Force -Path $devTools | Out-Null
-foreach ($n in @("block-backend.ps1", "purge-local-identity.ps1", "switch-auto-update.ps1")) {
+foreach ($n in @("block-backend.ps1", "purge-local-identity.ps1", "switch-auto-update.ps1", "allow-lan-collab.ps1")) {
   $src = Join-Path $PackageRoot "tools\$n"
   if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $devTools $n) -Force }
 }
@@ -156,10 +156,22 @@ MathModel $Version 开发版 —— 说明
    - models.dev：第三方模型目录
    - 你自己配置的模型服务商 API
 
-5. 数据目录
+5. 局域网协作（同一 WiFi / 手机热点下多人一起做同一道题）
+   已经改成**不依赖官方服务器**：开房的通行证由本机签发、本机校验，协作数据走局域网，
+   不上传任何东西到 mathmodel.top。
+   用法：左边栏「局域网协作」→ 选一个项目 → 开房 → 把 6 位数字口令发给队友；
+        队友在同一 WiFi 下打开「局域网协作」→ 会自动看到房间 → 输入口令加入 → 房主同意即可。
+   队友连不上时按顺序检查：
+     a) 确认三台设备连的是**同一个** WiFi/热点，且没有开客户端隔离（AP isolation）。
+        有些路由器/校园网/酒店网络默认隔离同一 WiFi 内的设备，这种网络下谁也连不上谁。
+     b) 房主机器上放行防火墙（只需房主做一次，需要管理员）：
+            powershell -ExecutionPolicy Bypass -File "dev-tools\allow-lan-collab.ps1"
+     c) 端口别被占用：程序会在 47820~47829 里自动找空闲端口。
+
+6. 数据目录
    %APPDATA%\@mathmodel\desktop   —— 工作区、会话、设置都在这里，卸载时默认保留。
 
-6. 卸载
+7. 卸载
    「设置 → 应用 → 已安装的应用」里找 mathmodel $Version 开发版，
    或直接运行安装目录下的 Uninstall.exe。
 "@

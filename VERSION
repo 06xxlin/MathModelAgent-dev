@@ -1,5 +1,5 @@
 patchFor=0.0.23
-headerHash=24f838ead98f04c394379f014bf9baf3cb6a4c4927991b88fe9b5f5ca3596633
+headerHash=2d367a8fd33591184524bdda0027108208dcfd8f3ce971d54803430992127f8e
 officialAsarSha256=663c52fcc8650fd24a03350b10d348b89a08d3046152ad30278e310827520f5c
-builtAt=2026-10-05T17:16:00
+builtAt=2026-10-05T20:13:17
 touched=out/main/index.js,out/preload/index.mjs,out/renderer/assets/index-Cp0PZz7I.js,out/renderer/assets/SettingsPage-BnJELjcj.js

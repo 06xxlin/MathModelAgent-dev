@@ -461,6 +461,42 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     }
   }
 
+  // ---- 局域网协作：把「服务器签发的通行证」换成本地签发/本地校验 ----
+  // 官方的局域网协作（房间 + mDNS 广播 + 0.0.0.0 上的协作服务）本来完全依赖后台：
+  //   · 开房：authorizeHost()  -> POST /api/collab/access-pass {purpose:'host'}
+  //   · 加入：verifyJoinAccessPass(pass, roomId) -> POST /api/collab/access-pass/verify
+  // 断网/断后台之后两边都直接 access_pass_unavailable，功能等于废掉。
+  //
+  // 好在通行证本身只是个 "base64url(payload).signature" 形式的串，程序内部的解码函数
+  // ug() 只检查结构（version===1 且 subject 是 43 位 base64url），**并不验签**
+  // （验签是后台做的）。所以我们本地签发一个同结构的串、本地校验直接放行即可，
+  // 全程不产生任何外发请求。协作数据本身走的是局域网 WebSocket，跟后台无关。
+  if (mainSrc.includes('/*dev-collab*/')) {
+    report.anchors['main.collabAccess'] = 'already-patched';
+  } else {
+    let collabDone = false;
+    // 形如: {'authorizeHost':()=>uc({'purpose':_0x38ce4d(0x455)}),'verifyJoinAccessPass':hc}
+    const collabRe = /\{'authorizeHost':\(\)=>[\w$]+\(\{'purpose':[\w$]+\((0x[0-9a-fA-F]+)\)\}\)(?:,'verifyJoinAccessPass':[\w$]+)?\}/;
+    const cm = collabRe.exec(mainSrc);
+    if (cm && (!dec || !dec.map[cm[1]] || dec.map[cm[1]] === 'host')) {
+      const PASSGEN =
+        '(()=>{var r=function(n){return Buffer.from(Array.from({length:n},function(){return Math.floor(256*Math.random())})).toString("base64url")};' +
+        'var b=Buffer.from(JSON.stringify({version:1,subject:r(32)})).toString("base64url");return b+"."+r(32)})()';
+      const repl =
+        "{'authorizeHost':async()=>({'ok':!0x0,'accessPass':" + PASSGEN + ",'expiresAt':Date.now()+0x36ee80})," +
+        "'verifyJoinAccessPass':async(_p,roomId)=>({'ok':!0x0,'purpose':'join','roomId':roomId,'expiresAt':Date.now()+0x36ee80})}/*dev-collab*/";
+      mainSrc = mainSrc.slice(0, cm.index) + repl + mainSrc.slice(cm.index + cm[0].length);
+      collabDone = true;
+    }
+    if (collabDone) {
+      report.anchors['main.collabAccess'] = 'local-pass';
+      report.collabAccessLocalized = true;
+      console.log('      局域网协作通行证已改为本地签发/本地校验（不再依赖后台）');
+    } else {
+      report.warnings.push('[main.collabAccess] 未定位到协作访问控制对象（局域网协作可能仍被后台门槛挡住）');
+    }
+  }
+
   fs.writeFileSync(mainPath, mainSrc);
   report.touched.push(mainRel);
 }
@@ -497,11 +533,29 @@ let pre = fs.readFileSync(prePath, 'utf8');
   }
 
   // 4.3 账户/权益/积分桥接本地化（已替换过的跳过，保证可重复运行）
+  // 局域网协作的通行证：官方要去后台换，这里本地签发一个同结构的串。
+  // 主进程那侧也被改成「本地校验直接放行」，所以队友之间能凭这个串加入房间。
+  // 结构要求（跟程序内部的解码函数 ug() 对齐）："base64url({version:1,subject:<43位base64url>}).<签名占位>"，
+  // 整串长度要 >= 64（发送前的 schema 校验）。用 btoa 而不是 Buffer：preload 可能是沙箱环境。
+  const COLLAB_PASS_IMPL =
+    'getCollabAccessPass:async()=>{' +
+    'const B=s=>btoa(s).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"");' +
+    'const R=n=>{const a=new Uint8Array(n);(globalThis.crypto||self.crypto).getRandomValues(a);' +
+    'let s="";for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);return B(s)};' +
+    'const b=B(JSON.stringify({version:1,subject:R(32)}));' +
+    'return{ok:!0x0,accessPass:b+"."+R(32),expiresAt:Date.now()+0x36ee80}}';
+  // 兼容早期补丁留下的 dev_mode 占位（那种串发给房主会被判 invalid_access_pass）
+  const OLD_COLLAB_PASS = 'getCollabAccessPass:async()=>({ok:!0x1,error:"dev_mode"})';
+  if (pre.includes(OLD_COLLAB_PASS)) {
+    pre = pre.split(OLD_COLLAB_PASS).join(COLLAB_PASS_IMPL);
+    report.anchors['preload.collabAccessPass'] = 'upgraded-from-dev_mode';
+    console.log('      协作通行证占位已升级：dev_mode → 本地签发');
+  }
   const stubs = [
     [/getEntitlements:\(\)=>\w+\.invoke\("mathmodel:auth-entitlements"\)/,
       'getEntitlements:async()=>({ok:!0x0,active:!0x0,lifetime:!0x0,source:"purchase",plan:"pro",expiresAt:null,error:null})'],
     [/getCollabAccessPass:\w+=>\w+\.invoke\("mathmodel:auth-collab-access-pass",\w+\)/,
-      'getCollabAccessPass:async()=>({ok:!0x1,error:"dev_mode"})'],
+      COLLAB_PASS_IMPL],
     [/getCredits:\(\)=>\w+\.invoke\("mathmodel:auth-credits"\)/,
       'getCredits:async()=>({summary:{balanceCredits:0x5f5e0ff,usedCredits:0x0,coveredByEntitlement:!0x0}})'],
     [/getPendingNotification:\(\)=>\w+\.invoke\("mathmodel:auth-pending-notification"\)/,
