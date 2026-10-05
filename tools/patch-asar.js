@@ -221,25 +221,39 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
     console.log('      debug: 首个 this[_0x..(0x..)]=_0x.., 片段 = ' + (m ? m[0] : '(无)'));
   }
   let patched = false;
+  // 计费锚点有两种写法，先静默尝试、全都失败才报警告：
+  //   A. <=0.0.21: this[_0x…(0xHEX)]=_0x…,
+  //   B. >=0.0.23: 构造函数里直接用明文键 this["chargeDesktopConversation"]=_0x…,
+  const tryChargeReplace = (re) => {
+    const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+    const n = (mainSrc.match(g) || []).length;
+    if (n !== 1) return false;
+    mainSrc = mainSrc.replace(g, (mm) => mm.replace(/=_0x[0-9a-fA-F]+,$/, '=null,'));
+    return true;
+  };
   if (dec) {
     const hexes = Object.keys(dec.map).filter(h => dec.map[h] === 'chargeDesktopConversation');
     report.anchors.chargePropertyHex = hexes;
     for (const h of hexes) {
       // 已是补丁状态（=null,）也算成功，保证可重复运行
-      if (new RegExp('this\\[_0x[0-9a-fA-F]+\\(' + h + '\\)\\]=null,').test(mainSrc)) {
+      if (new RegExp('this\\[_0x[0-9a-fA-F]+\\(' + h + '\\)\\]=null,').test(mainSrc) ||
+          new RegExp('this\\[["\']chargeDesktopConversation["\']\\]=null,').test(mainSrc)) {
         report.anchors['main.charge[' + h + ']'] = 'already-patched';
         patched = true;
         break;
       }
-      const re = new RegExp('this\\[_0x[0-9a-fA-F]+\\(' + h + '\\)\\]=_0x[0-9a-fA-F]+,');
-      const r = replaceOnce(mainSrc, re, (mm) => mm.replace(/=_0x[0-9a-fA-F]+,$/, '=null,'), `main.charge[${h}]`);
-      if (r.ok) { mainSrc = r.content; patched = true; break; }
+      if (tryChargeReplace(new RegExp('this\\[_0x[0-9a-fA-F]+\\(' + h + '\\)\\]=_0x[0-9a-fA-F]+,'))) {
+        report.anchors['main.charge[' + h + ']'] = 'hex-assignment';
+        patched = true;
+        break;
+      }
     }
   }
   if (!patched) {
-    const re = /this\[["']chargeDesktopConversation["']\]=_0x[0-9a-fA-F]+,/;
-    const r = replaceOnce(mainSrc, re, (mm) => mm.replace(/=_0x[0-9a-fA-F]+,$/, '=null,'), 'main.charge.literal');
-    if (r.ok) { mainSrc = r.content; patched = true; }
+    if (tryChargeReplace(/this\[["']chargeDesktopConversation["']\]=_0x[0-9a-fA-F]+,/)) {
+      report.anchors['main.charge.literal'] = 'literal-assignment';
+      patched = true;
+    }
   }
   if (!patched) throw new Error('主进程计费锚点未找到（chargeDesktopConversation 赋值）');
 
@@ -302,46 +316,55 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
   // ---- 网络隔离（2/2）：停用遥测批量上报 ----
   // 找到向 /api/desktop/telemetry/batch POST 的那个函数，整体替换为「直接返回成功」，
   // 这样事件不再外发、本地发件箱也不会一直堆积重试。
-  // 端点字符串同样可能被搬进混淆字符串表，所以按「解表得到的索引」而不是写死的十六进制定位。
+  // 端点字符串有三种写法，都得认：
+  //   A. 混淆字符串表：   await X(_0x…(0x4de), …)
+  //   B. 明文单/双引号：  await X('/api/desktop/telemetry/batch', …)   （0.0.23 起）
   if (noIsolation) {
     report.anchors['main.telemetryBatch'] = 'skipped(--no-isolation)';
   } else if (mainSrc.includes('/*dev-notel*/')) {
     report.anchors['main.telemetryBatch'] = 'already-patched';
   } else {
+    const TEL_PATH = '/api/desktop/telemetry/batch';
     const telHexes = new Set(['0x8e8', '0x4de']); // 已知历史版本内联索引（兜底）
     if (dec) {
       for (const [hex, val] of Object.entries(dec.map)) {
-        if (val === '/api/desktop/telemetry/batch') telHexes.add(hex);
+        if (val === TEL_PATH) telHexes.add(hex);
       }
     }
+    // 端点参数的两种形态：<alias>(0xHEX) 或 '明文路径'
+    const endpointAlts = [];
+    for (const hex of telHexes) endpointAlts.push('_0x[0-9a-fA-F]+\\(' + hex + '\\)');
+    endpointAlts.push("'\\/api\\/desktop\\/telemetry\\/batch'");
+    endpointAlts.push('"\\/api\\/desktop\\/telemetry\\/batch"');
+    const endpointPat = '(?:' + endpointAlts.join('|') + ')';
 
-    let tm = null, telHexUsed = null;
-    for (const hex of telHexes) {
+    let tm = null, telMark = null;
+    {
       const strict = new RegExp(
         '(?:async\\s+)?function (\\w+)\\((\\w+)\\)\\{const (\\w+)=_0x[0-9a-fA-F]+(?:\\(\\))?;' +
         'if\\(0x0===\\2\\[\\3\\(0x[0-9a-fA-F]+\\)\\]\\)return!0x0;' +
-        'const \\w+=await \\w+\\(\\3\\(' + hex + '\\)'
+        'const \\w+=await \\w+\\(' + endpointPat
       );
       const m = strict.exec(mainSrc);
-      if (m) { tm = m; telHexUsed = hex; break; }
+      if (m) { tm = m; telMark = m[0].slice(-40); }
     }
 
-    // 宽松兜底：先找到「await X(Y(<hex>))」调用点，再回退到最近的函数声明
+    // 宽松兜底：先找到「await X(<端点>)」调用点，再回退到最近的函数声明
     if (!tm) {
-      for (const hex of telHexes) {
-        const callRe = new RegExp('await \\w+\\(\\w+\\(' + hex + '\\)');
-        const cm = callRe.exec(mainSrc);
-        if (!cm) continue;
+      const callRe = new RegExp('await \\w+\\(' + endpointPat);
+      const cm = callRe.exec(mainSrc);
+      if (cm) {
         const before = mainSrc.slice(0, cm.index);
         const fm = /(?:async\s+)?function (\w+)\((\w+)\)\{/g;
         let last = null, m2;
         while ((m2 = fm.exec(before))) last = m2;
-        if (!last) continue;
-        const bodyEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', last.index));
-        if (bodyEnd - last.index > 4000) continue; // 太远，可能不是遥测函数，放弃
-        tm = { index: last.index, 1: last[1], 2: last[2] };
-        telHexUsed = hex + '(loose)';
-        break;
+        if (last) {
+          const bodyEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', last.index));
+          if (bodyEnd - last.index <= 4000) {
+            tm = { index: last.index, 1: last[1], 2: last[2] };
+            telMark = 'loose:' + mainSrc.slice(cm.index, cm.index + 40);
+          }
+        }
       }
     }
 
@@ -351,7 +374,7 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
       const fnStart = tm.index;
       const fnEnd = extractBalanced(mainSrc, mainSrc.indexOf('{', fnStart));
       mainSrc = mainSrc.slice(0, fnStart) + 'async function ' + tm[1] + '(' + tm[2] + '){return!0x0;/*dev-notel*/}' + mainSrc.slice(fnEnd + 1);
-      report.anchors['main.telemetryBatch'] = 'stubbed(' + telHexUsed + ')';
+      report.anchors['main.telemetryBatch'] = 'stubbed(' + telMark + ')';
       report.telemetryStubbed = true;
       console.log('      遥测上报已停用: ' + tm[1] + '() → 直接返回成功（事件不再外发）');
     }
@@ -372,17 +395,21 @@ let mainSrc = fs.readFileSync(mainPath, 'utf8');
         if (val === 'verifyUpdateCodeSignature') sigHexes.push(hex);
       }
     }
+    // 两种属性名写法：
+    //   A. <=0.0.21: _0x312d5c[_0x2d97e3(0xb0c)]=(a,b)=>{ ...        （字符串表索引）
+    //   B. >=0.0.23: _0x4eab97['verifyUpdateCodeSignature']=(a,b)=>{ ... }（明文，且阻断文案也变成明文）
+    const sigPatterns = sigHexes.map(h => '\\[[\\w$]+\\((' + h + ')\\)\\]');
+    sigPatterns.push('\\[[\'"]verifyUpdateCodeSignature[\'"]\\]');
     let sigDone = null;
-    for (const hex of sigHexes) {
-      // 形如:  _0x312d5c[_0x2d97e3(0xb0c)]=(_0x2733d5,_0x353fd5)=>{ ... }
-      const re = new RegExp('\\[[\\w$]+\\((' + hex + ')\\)\\]=(\\([\\w$,\\s]*\\)|[\\w$]+)=>\\{');
+    for (const propPat of sigPatterns) {
+      const re = new RegExp(propPat + '=(\\([\\w$,\\s]*\\)|[\\w$]+)=>\\{');
       const m = re.exec(mainSrc);
       if (!m) continue;
       const braceIdx = m.index + m[0].length - 1;
       if (mainSrc[braceIdx] !== '{') continue;
       const end = extractBalanced(mainSrc, braceIdx);
       mainSrc = mainSrc.slice(0, braceIdx) + '{return Promise.resolve(null);/*dev-nosig*/}' + mainSrc.slice(end + 1);
-      sigDone = hex;
+      sigDone = propPat.includes('verifyUpdateCodeSignature') ? 'literal' : m[1];
       break;
     }
     if (sigDone) {

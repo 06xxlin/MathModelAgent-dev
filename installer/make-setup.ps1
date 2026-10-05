@@ -192,7 +192,10 @@ Unicode true
 
 Name "MathModel @@VERSION@@ 开发版"
 OutFile "@@OUTFILE@@"
-InstallDir "$LOCALAPPDATA\Programs\mathmodel"
+; 官方 0.0.23 起安装目录是 Programs\@mathmodeldesktop（0.0.20~0.0.22 用过 Programs\mathmodel）。
+; 实际装到哪儿以 InstallDirRegKey 记的为准，缺省值跟着官方走，
+; 这样自动更新拿到的安装包会覆盖在同一个目录，而不是并排装出第二份。
+InstallDir "$LOCALAPPDATA\Programs\@mathmodeldesktop"
 InstallDirRegKey HKCU "Software\MathModel\DesktopDev" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma

@@ -92,6 +92,14 @@ if ($UpdateRepo -ne "-") {
   Write-Host "    更新源已改为 GitHub Release: $UpdateRepo (channel=$UpdateChannel)"
 }
 
+# ---------- 记住安装位置 ----------
+# 官方 0.0.23 把安装目录从 Programs\mathmodel 换回了 Programs\@mathmodeldesktop。
+# 自制的 setup 靠 InstallDirRegKey 决定装到哪儿，不写这个键的话自动更新会装去另一个目录，
+# 结果就是「更新完还是旧版本」。这里把当前安装位置记下来，更新时才会覆盖同一个目录。
+New-Item -Path "HKCU:\Software\MathModel\DesktopDev" -Force | Out-Null
+Set-ItemProperty -Path "HKCU:\Software\MathModel\DesktopDev" -Name "InstallDir" -Value $AppRoot -Force
+Write-Host "    已记录安装位置（供自动更新覆盖安装用）: $AppRoot"
+
 Write-Host ""
 Write-Host "全部完成！双击启动: $($exe.FullName)" -ForegroundColor Green
 Write-Host "提示: 首启无需登录，界面显示「开发者 / 开发版」即为成功。" -ForegroundColor Green
